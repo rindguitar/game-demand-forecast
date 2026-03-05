@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: game-demand-forecast-dev
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      - ./Makefile:/app/Makefile
+    ports:
+      - "8888:8888"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -1,0 +1,41 @@
+# Dependencies
+# プロジェクト進行に合わせて追加予定
+
+# Core（ほぼ確実に使用）
+# - numpy
+# - pandas
+# - matplotlib
+# - scipy
+
+# Phase 2: Data Collection
+# - praw              # Reddit API
+# - requests          # HTTP requests
+# - python-dotenv     # 環境変数管理
+
+# Phase 3-4: NLP
+# - transformers      # Hugging Face
+# - torch             # PyTorch
+# - bertopic          # トピック抽出
+# - sentence-transformers  # 文章埋め込み
+
+# Phase 7: Time Series (Prophet)
+# - prophet           # 時系列予測
+
+# Phase 8-9: Time Series (LSTM)
+# - torch             # PyTorch（既に追加済み）
+
+# Database
+# - sqlite3           # 標準ライブラリ（インストール不要）
+
+# Utilities
+# - tqdm              # プログレスバー
+
+# Development Tools
+# - jupyter           # Jupyter Notebook
+# - jupyterlab        # Jupyter Lab
+# - ipykernel         # Jupyter kernel
+# - pytest            # テストフレームワーク
+# - black             # コードフォーマッター
+# - flake8            # Linter
+# - pylint            # Linter
+# - isort             # import整理
