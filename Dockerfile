@@ -24,9 +24,13 @@ COPY requirements.txt .
 
 # Pythonライブラリインストール
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Jupyter拡張
+# requirements.txtが空でなければインストール（コメント行のみの場合も考慮）
+RUN if grep -q '^[^#]' requirements.txt 2>/dev/null; then \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
+
+# Jupyter拡張（最低限必要）
 RUN pip install --no-cache-dir jupyterlab
 
 # ポート開放
