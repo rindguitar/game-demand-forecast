@@ -6,15 +6,15 @@ ENV PYTHONUNBUFFERED=1
 
 # 基本パッケージインストール
 RUN apt-get update && apt-get install -y \
-    python3.11 \
+    python3 \
     python3-pip \
     git \
     make \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python3.11をデフォルトに
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+# Python3（3.10）をデフォルトに
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 WORKDIR /app

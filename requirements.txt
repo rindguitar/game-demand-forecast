@@ -1,8 +1,15 @@
 # Dependencies
 # プロジェクト進行に合わせて追加予定
 
+# Core - Deep Learning
+# PyTorch（CUDA 11.8対応）
+# インストール: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+torch==2.7.1+cu118
+torchvision==0.22.1+cu118
+torchaudio==2.7.1+cu118
+
 # Core（ほぼ確実に使用）
-# - numpy
+# - numpy  # PyTorchの依存関係として自動インストール
 # - pandas
 # - matplotlib
 # - scipy
