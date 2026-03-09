@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ゲーム業界のプレイヤー需要予測システム。Reddit APIとSteam APIからデータを収集し、NLP（自然言語処理）と時系列分析を組み合わせて、プレイヤーが求めるゲーム要素やトレンドを予測する機械学習プロジェクト。
 
 ### 技術スタック
-- Python 3.11（Docker環境）
+- Python 3.10（Docker環境・Ubuntu 22.04デフォルト）
 - GPU: NVIDIA CUDA 11.8（nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04）
+- PyTorch: 2.7.1+cu118（CUDA 11.8対応）
 - NLP: Hugging Face Transformers, BERTopic, DistilBERT
 - 時系列予測: Prophet（Phase 1）、LSTM + PyTorch（Phase 2）
 - データソース: Reddit API（PRAW）、Steam API
@@ -16,35 +17,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 開発環境セットアップ
 
-### Docker環境の起動
+### ⚠️ 重要：Makeコマンドを優先使用すること
+このプロジェクトでは、Docker操作や開発タスクは**Makeコマンドを優先して使用**してください。
+直接`docker-compose`コマンドを使う代わりに、`make`コマンドを使うことで一貫性のある操作が可能です。
+
+### Docker環境の起動（Makeコマンド使用）
 ```bash
-# コンテナのビルドと起動
-docker-compose up -d
+# コンテナのビルド
+make build
+
+# コンテナを起動
+make up
 
 # コンテナに入る
-docker-compose exec dev bash
+make shell
 
 # GPU認識確認
-python -c "import torch; print(torch.cuda.is_available())"
+make gpu-check
+
+# Pythonバージョン確認
+make python-version
+
+# コンテナ停止・削除
+make down
+
+# コンテナ再起動
+make restart
+
+# ログ確認
+make logs
 ```
 
-### 依存関係管理
-**重要**: `requirements.txt`は段階的に追加する運用。現在はコメント行のみで、プロジェクト進行に合わせて必要なライブラリを追加していく。
-
+### Makeコマンド一覧
 ```bash
-# コンテナ内でライブラリをインストール
-pip install <package-name>
+# 全コマンドを表示
+make help
 
-# requirements.txtに追記
-pip freeze | grep <package-name> >> requirements.txt
+# Docker操作
+make build         # Dockerイメージをビルド
+make up            # Dockerコンテナを起動
+make down          # Dockerコンテナを停止・削除
+make restart       # Dockerコンテナを再起動
+make logs          # Dockerログを表示
+make shell         # コンテナ内にbashで入る
+make exec CMD=xxx  # コンテナ内でコマンド実行
 
-# コンテナを再ビルド
-docker-compose build
-```
+# 環境確認
+make gpu-check     # GPU認識確認
+make python-version # Pythonバージョン確認
 
-### Makeコマンド
-```bash
-make help          # 利用可能なコマンド一覧
+# 開発
 make setup         # 初期セットアップ（requirements.txtからインストール）
 make notebook      # Jupyter Lab起動（ポート8888）
 make test          # 全テスト実行
@@ -53,9 +75,26 @@ make test-ts       # 時系列予測関連テストのみ実行
 make lint          # Linter実行（flake8 + pylint）
 make format        # コードフォーマット（black + isort）
 make clean         # キャッシュ削除（__pycache__, .pyc, .pytest_cache等）
+
+# 機械学習
 make collect-data  # データ収集実行
 make train-prophet # Prophet学習実行
 make train-lstm    # LSTM学習実行
+```
+
+### 依存関係管理
+**重要**: `requirements.txt`は段階的に追加する運用。現在はコメント行のみで、プロジェクト進行に合わせて必要なライブラリを追加していく。
+
+```bash
+# コンテナ内でライブラリをインストール
+make shell
+pip install <package-name>
+
+# requirements.txtに追記
+pip freeze | grep <package-name> >> requirements.txt
+
+# コンテナを再ビルド
+make build
 ```
 
 ## アーキテクチャ
