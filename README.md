@@ -33,8 +33,13 @@ cd game-demand-forecast
 ### 2. 環境変数設定
 ```bash
 cp .env.example .env
-# .envを編集してAPIキーを設定
+# .envを**手動で**編集してAPIキーを設定
 ```
+
+**⚠️ セキュリティ注意**:
+- `.env`ファイルは`.claudeignore`で保護されており、Claude Codeから読み込めません
+- APIキーは**必ず手動で**設定してください
+- `.env`ファイルは絶対にコミットしないでください（`.gitignore`に含まれています）
 
 ### 3. Docker起動
 ```bash

@@ -1,0 +1,70 @@
+# Claude Code Ignore File
+# このファイルに記載されたファイル・ディレクトリはClaude Codeから読み込まれません
+
+# 環境変数ファイル（APIキー・機密情報を含む）
+.env
+.env.local
+.env.*.local
+
+# データベースファイル（個人情報・大容量データを含む可能性）
+*.db
+*.sqlite
+*.sqlite3
+data/game_demand.db
+
+# 機密情報を含む可能性のあるファイル
+secrets/
+credentials/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# 大容量ファイル（データセット等）
+data/raw/**
+data/processed/**
+*.csv
+*.json
+*.parquet
+
+# モデルファイル（大容量）
+models/**
+*.pth
+*.pt
+*.h5
+*.pkl
+*.joblib
+
+# ログファイル
+*.log
+logs/
+
+# Jupyter Notebookチェックポイント
+.ipynb_checkpoints/
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 仮想環境
+venv/
+env/
+ENV/
+.venv
+
+# IDE設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+
+# Dockerボリューム
+.docker/
