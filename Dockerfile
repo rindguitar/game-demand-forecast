@@ -30,6 +30,10 @@ RUN if grep -q '^[^#]' requirements.txt 2>/dev/null; then \
         pip install --no-cache-dir -r requirements.txt; \
     fi
 
+# PyTorch（CUDA 11.8対応）- 専用インデックスURLが必要なため直接インストール
+RUN pip install --no-cache-dir torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu118
+
 # Jupyter拡張（最低限必要）
 RUN pip install --no-cache-dir jupyterlab
 
