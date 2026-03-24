@@ -194,6 +194,16 @@ Steam APIキーの取得: https://steamcommunity.com/dev/apikey
 - `main`: 常にデプロイ可能な状態
 - `feature/xxx`: 新機能開発（例: `feature/data-collection`, `feature/sentiment-analysis`）
 
+**⚠️ 重要：新しいブランチ作成時のルール**
+1. ブランチを作成したら、**作業開始前に必ずリモートにプッシュ**すること
+2. 手順：
+   ```bash
+   git checkout -b feature/xxx
+   git push -u origin feature/xxx  # ← 必ず実行！
+   # その後、作業開始
+   ```
+3. これにより、作業の追跡とバックアップが確実になる
+
 ### コミットメッセージ規約
 ```
 feat: 新機能追加
