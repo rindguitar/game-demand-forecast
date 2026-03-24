@@ -18,8 +18,8 @@
 # - python-dotenv     # 環境変数管理
 
 # Phase 3-4: NLP
-# - transformers      # Hugging Face
-# - torch             # PyTorch
+transformers      # Hugging Face
+# - torch             # PyTorch（Dockerfileでインストール済み）
 # - bertopic          # トピック抽出
 # - sentence-transformers  # 文章埋め込み
 
