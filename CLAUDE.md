@@ -23,6 +23,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 このプロジェクトでは、Docker操作や開発タスクは**Makeコマンドを優先して使用**してください。
 直接`docker-compose`コマンドを使う代わりに、`make`コマンドを使うことで一貫性のある操作が可能です。
 
+### ⚠️ 重要：時間のかかる操作はユーザーが実行
+以下の操作は時間がかかるため、**Claude Codeではなくユーザーが手動で実行**してください：
+- `make build`（Dockerイメージの再ビルド）- 数分～10分以上かかる
+- `make down && make build && make up`（完全な再ビルド）
+- 大量データのダウンロード・処理
+
+**Claude Codeの役割**：
+- コードの実装・編集
+- `requirements.txt`の更新
+- 短時間で完了するテスト実行（`make exec CMD="..."`等）
+- ユーザーに「再ビルドが必要です」と通知
+
 ### Docker環境の起動（Makeコマンド使用）
 ```bash
 # コンテナのビルド

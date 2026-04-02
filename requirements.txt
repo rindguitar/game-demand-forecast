@@ -7,15 +7,15 @@
 # インストール: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Core（ほぼ確実に使用）
-# - numpy  # PyTorchの依存関係として自動インストール
-# - pandas
+numpy
+pandas
 # - matplotlib
 # - scipy
 
 # Phase 2: Data Collection
-# - praw              # Reddit API
-# - requests          # HTTP requests
-# - python-dotenv     # 環境変数管理
+# - praw              # Reddit API（使用しない）
+requests          # HTTP requests
+python-dotenv     # 環境変数管理
 
 # Phase 3-4: NLP
 transformers      # Hugging Face
