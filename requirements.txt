@@ -9,6 +9,7 @@
 # Core（ほぼ確実に使用）
 numpy
 pandas
+scikit-learn      # 機械学習（評価指標等）
 # - matplotlib
 # - scipy
 
