@@ -40,7 +40,7 @@ transformers      # Hugging Face
 # - jupyter           # Jupyter Notebook
 # - jupyterlab        # Jupyter Lab
 # - ipykernel         # Jupyter kernel
-# - pytest            # テストフレームワーク
+pytest              # テストフレームワーク
 # - black             # コードフォーマッター
 # - flake8            # Linter
 # - pylint            # Linter

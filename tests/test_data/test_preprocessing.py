@@ -7,9 +7,10 @@ This script tests the preprocessing module with sample data.
 import sys
 import os
 import json
+import pandas as pd
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# srcをパスに追加
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.data.preprocessing import (
     clean_review_text,
@@ -245,6 +246,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # Import pandas here to avoid import error if not installed
-    import pandas as pd
     exit(main())
