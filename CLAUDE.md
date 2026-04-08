@@ -202,6 +202,34 @@ Steam APIキーの取得: https://steamcommunity.com/dev/apikey
 - **Notebook**: 試行錯誤、データ分析、可視化確認
 - **Pythonファイル**: 確定したコード、再利用可能な関数、自動実行スクリプト
 
+### コメント・ドキュメントの日本語化
+**重要**: コード内のコメントとdocstringは日本語で記述すること
+
+- **docstring**: 関数・クラスの説明は日本語で記述
+- **インラインコメント**: `#`コメントも日本語で記述
+- **変数名・関数名**: 英語のまま（Pythonの慣例に従う）
+
+**例**:
+```python
+def analyze_sentiment(texts: List[str]) -> List[int]:
+    """
+    テキストの感情分析を実行
+
+    Args:
+        texts: 分析するテキストのリスト
+
+    Returns:
+        予測ラベルのリスト (1=POSITIVE, 0=NEGATIVE)
+    """
+    # パイプライン初期化
+    pipeline = load_model()
+
+    # 感情分析実行
+    results = pipeline(texts)
+
+    return results
+```
+
 ### ブランチ戦略
 - `main`: 常にデプロイ可能な状態
 - `feature/xxx`: 新機能開発（例: `feature/data-collection`, `feature/sentiment-analysis`）
