@@ -23,6 +23,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 このプロジェクトでは、Docker操作や開発タスクは**Makeコマンドを優先して使用**してください。
 直接`docker-compose`コマンドを使う代わりに、`make`コマンドを使うことで一貫性のある操作が可能です。
 
+### ⚠️ 重要：時間のかかる操作はユーザーが実行
+以下の操作は時間がかかるため、**Claude Codeではなくユーザーが手動で実行**してください：
+- `make build`（Dockerイメージの再ビルド）- 数分～10分以上かかる
+- `make down && make build && make up`（完全な再ビルド）
+- 大量データのダウンロード・処理
+
+**Claude Codeの役割**：
+- コードの実装・編集
+- `requirements.txt`の更新
+- 短時間で完了するテスト実行（`make exec CMD="..."`等）
+- ユーザーに「再ビルドが必要です」と通知
+
 ### Docker環境の起動（Makeコマンド使用）
 ```bash
 # コンテナのビルド
@@ -190,6 +202,34 @@ Steam APIキーの取得: https://steamcommunity.com/dev/apikey
 - **Notebook**: 試行錯誤、データ分析、可視化確認
 - **Pythonファイル**: 確定したコード、再利用可能な関数、自動実行スクリプト
 
+### コメント・ドキュメントの日本語化
+**重要**: コード内のコメントとdocstringは日本語で記述すること
+
+- **docstring**: 関数・クラスの説明は日本語で記述
+- **インラインコメント**: `#`コメントも日本語で記述
+- **変数名・関数名**: 英語のまま（Pythonの慣例に従う）
+
+**例**:
+```python
+def analyze_sentiment(texts: List[str]) -> List[int]:
+    """
+    テキストの感情分析を実行
+
+    Args:
+        texts: 分析するテキストのリスト
+
+    Returns:
+        予測ラベルのリスト (1=POSITIVE, 0=NEGATIVE)
+    """
+    # パイプライン初期化
+    pipeline = load_model()
+
+    # 感情分析実行
+    results = pipeline(texts)
+
+    return results
+```
+
 ### ブランチ戦略
 - `main`: 常にデプロイ可能な状態
 - `feature/xxx`: 新機能開発（例: `feature/data-collection`, `feature/sentiment-analysis`）
@@ -210,6 +250,31 @@ feat: 新機能追加
 fix: バグ修正
 docs: ドキュメント更新
 refactor: リファクタリング
+```
+
+### ⚠️ 重要：コミット・プッシュのワークフロー
+**必ず以下の順序を守ること**：
+
+1. **実装**: コードを書く
+2. **テスト実行**: 実装したコードをテストし、成功を確認する
+3. **コミット**: 変更をコミットする
+4. **プッシュ**: コミットとセットで必ずリモートにプッシュする
+
+**絶対にやってはいけないこと**：
+- ❌ テストを実行せずにコミット・プッシュ
+- ❌ コミットだけしてプッシュを忘れる
+
+**正しい例**：
+```bash
+# 1. 実装完了後、テストを実行
+make exec CMD="python scripts/test_xxx.py"
+
+# 2. テスト成功を確認してからコミット
+git add <files>
+git commit -m "..."
+
+# 3. コミットしたら必ずプッシュ（セット）
+git push origin <branch-name>
 ```
 
 ## テスト実行

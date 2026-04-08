@@ -1,5 +1,7 @@
 # データファイル
 data/
+!data/raw/.gitkeep
+!data/validation/.gitkeep
 *.csv
 *.db
 *.sqlite
