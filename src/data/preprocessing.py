@@ -52,17 +52,17 @@ def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
 
     Returns:
         DataFrame with columns:
-            - review_text: Cleaned review text
-            - label: Binary label (1=Positive/Recommended, 0=Negative/Not Recommended)
-            - votes_up: Number of upvotes
-            - language: Review language
-            - timestamp_created: Review creation timestamp
-            - author: Author's Steam ID
+            - review_text: Cleaned review text (レビュー本文)
+            - game_rating: Binary label (1=Recommended/おすすめ, 0=Not Recommended/おすすめしない)
+            - review_helpfulness: Number of upvotes (役に立った投票数)
+            - language: Review language (言語)
+            - posted_date: Review creation timestamp (投稿日時)
+            - user_id: Author's Steam ID (ユーザーID)
 
     Example:
         >>> reviews = [{'review_text': 'Great!', 'voted_up': True, ...}]
         >>> df = steam_reviews_to_dataframe(reviews)
-        >>> df['label'].iloc[0]
+        >>> df['game_rating'].iloc[0]
         1
     """
     if not reviews:
@@ -73,11 +73,11 @@ def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
     for review in reviews:
         data.append({
             'review_text': clean_review_text(review.get('review_text', '')),
-            'label': 1 if review.get('voted_up', False) else 0,  # 1=Positive, 0=Negative
-            'votes_up': review.get('votes_up', 0),
+            'game_rating': 1 if review.get('voted_up', False) else 0,  # 1=Recommended, 0=Not Recommended
+            'review_helpfulness': review.get('votes_up', 0),  # Number of upvotes
             'language': review.get('language', ''),
-            'timestamp_created': review.get('timestamp_created', 0),
-            'author': review.get('author', ''),
+            'posted_date': review.get('timestamp_created', 0),
+            'user_id': review.get('author', ''),
         })
 
     df = pd.DataFrame(data)
@@ -93,16 +93,16 @@ def balance_dataset(df: pd.DataFrame, n_samples_per_class: int = None) -> pd.Dat
     Balance dataset by sampling equal number of positive and negative reviews
 
     Args:
-        df: DataFrame with 'label' column (0 or 1)
+        df: DataFrame with 'game_rating' column (0 or 1)
         n_samples_per_class: Number of samples per class (if None, use minimum class size)
 
     Returns:
         Balanced DataFrame with equal number of positive and negative reviews
 
     Example:
-        >>> df = pd.DataFrame({'label': [1, 1, 1, 0], 'text': ['a', 'b', 'c', 'd']})
+        >>> df = pd.DataFrame({'game_rating': [1, 1, 1, 0], 'review_text': ['a', 'b', 'c', 'd']})
         >>> balanced = balance_dataset(df)
-        >>> balanced['label'].value_counts()
+        >>> balanced['game_rating'].value_counts()
         0    1
         1    1
     """
@@ -110,8 +110,8 @@ def balance_dataset(df: pd.DataFrame, n_samples_per_class: int = None) -> pd.Dat
         return df
 
     # Count samples per class
-    positive_df = df[df['label'] == 1]
-    negative_df = df[df['label'] == 0]
+    positive_df = df[df['game_rating'] == 1]
+    negative_df = df[df['game_rating'] == 0]
 
     n_positive = len(positive_df)
     n_negative = len(negative_df)
@@ -156,7 +156,7 @@ def prepare_validation_dataset(
         >>> df = prepare_validation_dataset(pos, neg, n_per_class=10)
         >>> len(df)
         20
-        >>> df['label'].value_counts()
+        >>> df['game_rating'].value_counts()
         0    10
         1    10
     """

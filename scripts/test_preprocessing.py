@@ -22,7 +22,7 @@ from src.data.preprocessing import (
 def test_clean_review_text():
     """Test text cleaning function"""
     print("=" * 60)
-    print("Test 1: Text cleaning")
+    print("テスト1: テキストクリーニング")
     print("=" * 60)
 
     test_cases = [
@@ -40,23 +40,23 @@ def test_clean_review_text():
             print(f"✅ '{input_text}' → '{result}'")
             passed += 1
         else:
-            print(f"❌ '{input_text}' → '{result}' (expected '{expected}')")
+            print(f"❌ '{input_text}' → '{result}' (期待値: '{expected}')")
 
-    print(f"\n{passed}/{len(test_cases)} test cases passed")
+    print(f"\n{passed}/{len(test_cases)} テストケース成功")
     return passed == len(test_cases)
 
 
 def test_steam_reviews_to_dataframe():
     """Test DataFrame conversion"""
     print("\n" + "=" * 60)
-    print("Test 2: Steam reviews to DataFrame conversion")
+    print("テスト2: SteamレビューからDataFrameへの変換")
     print("=" * 60)
 
     # Load sample data
     sample_file = 'data/raw/sample_reviews.json'
     if not os.path.exists(sample_file):
-        print(f"❌ Sample data not found: {sample_file}")
-        print("  Run test_steam_api.py first to generate sample data")
+        print(f"❌ サンプルデータが見つかりません: {sample_file}")
+        print("  先にtest_steam_api.pyを実行してサンプルデータを生成してください")
         return False
 
     with open(sample_file, 'r', encoding='utf-8') as f:
@@ -68,31 +68,31 @@ def test_steam_reviews_to_dataframe():
     print(f"✅ Converted {len(reviews)} reviews to DataFrame")
     print(f"  - DataFrame shape: {df.shape}")
     print(f"  - Columns: {list(df.columns)}")
-    print(f"\nLabel distribution:")
-    print(df['label'].value_counts())
+    print(f"\nゲームへの評価（game_rating）の分布:")
+    print(df['game_rating'].value_counts())
 
     # Verify columns
-    required_columns = ['review_text', 'label', 'votes_up', 'language', 'timestamp_created', 'author']
+    required_columns = ['review_text', 'game_rating', 'review_helpfulness', 'language', 'posted_date', 'user_id']
     missing_columns = set(required_columns) - set(df.columns)
 
     if missing_columns:
-        print(f"❌ Missing columns: {missing_columns}")
+        print(f"❌ 不足しているカラム: {missing_columns}")
         return False
 
-    # Verify labels are 0 or 1
-    if not df['label'].isin([0, 1]).all():
-        print(f"❌ Invalid labels found (should be 0 or 1)")
+    # Verify game_rating are 0 or 1
+    if not df['game_rating'].isin([0, 1]).all():
+        print(f"❌ game_ratingに無効な値が含まれています（0または1である必要があります）")
         return False
 
-    print(f"✅ All required columns present")
-    print(f"✅ Labels are valid (0 or 1)")
+    print(f"✅ すべての必須カラムが存在します")
+    print(f"✅ game_ratingは有効です（0または1）")
 
     # Show sample
-    print(f"\nSample row:")
+    print(f"\nサンプル行:")
     sample = df.iloc[0]
-    print(f"  - Text: {sample['review_text'][:100]}...")
-    print(f"  - Label: {sample['label']} ({'Positive' if sample['label'] == 1 else 'Negative'})")
-    print(f"  - Language: {sample['language']}")
+    print(f"  - レビュー本文: {sample['review_text'][:100]}...")
+    print(f"  - ゲームへの評価: {sample['game_rating']} ({'おすすめ' if sample['game_rating'] == 1 else 'おすすめしない'})")
+    print(f"  - 言語: {sample['language']}")
 
     return True
 
@@ -100,7 +100,7 @@ def test_steam_reviews_to_dataframe():
 def test_balance_dataset():
     """Test dataset balancing"""
     print("\n" + "=" * 60)
-    print("Test 3: Dataset balancing")
+    print("テスト3: データセットバランシング")
     print("=" * 60)
 
     import pandas as pd
@@ -108,36 +108,36 @@ def test_balance_dataset():
     # Create imbalanced dataset
     df = pd.DataFrame({
         'review_text': ['text' + str(i) for i in range(15)],
-        'label': [1] * 10 + [0] * 5,  # 10 positive, 5 negative
-        'votes_up': list(range(15)),
+        'game_rating': [1] * 10 + [0] * 5,  # 10 positive, 5 negative
+        'review_helpfulness': list(range(15)),
         'language': ['english'] * 15,
-        'timestamp_created': list(range(15)),
-        'author': ['user' + str(i) for i in range(15)],
+        'posted_date': list(range(15)),
+        'user_id': ['user' + str(i) for i in range(15)],
     })
 
-    print(f"Original distribution:")
-    print(df['label'].value_counts())
+    print(f"元のデータ分布:")
+    print(df['game_rating'].value_counts())
 
     # Balance
     balanced_df = balance_dataset(df)
 
-    print(f"\nBalanced distribution:")
-    print(balanced_df['label'].value_counts())
+    print(f"\nバランス後のデータ分布:")
+    print(balanced_df['game_rating'].value_counts())
 
     # Verify balance
-    label_counts = balanced_df['label'].value_counts()
+    label_counts = balanced_df['game_rating'].value_counts()
     if len(label_counts) == 2 and label_counts[0] == label_counts[1]:
-        print(f"✅ Dataset is balanced ({label_counts[0]} samples per class)")
+        print(f"✅ データセットがバランスされました（クラスあたり{label_counts[0]}サンプル）")
         return True
     else:
-        print(f"❌ Dataset is not balanced")
+        print(f"❌ データセットがバランスされていません")
         return False
 
 
 def test_prepare_validation_dataset():
     """Test validation dataset preparation"""
     print("\n" + "=" * 60)
-    print("Test 4: Validation dataset preparation")
+    print("テスト4: 検証用データセット準備")
     print("=" * 60)
 
     # Create sample reviews
@@ -154,32 +154,32 @@ def test_prepare_validation_dataset():
     # Prepare validation dataset
     df = prepare_validation_dataset(positive_reviews, negative_reviews, n_per_class=5)
 
-    print(f"Validation dataset prepared:")
+    print(f"検証用データセットの準備完了:")
     print(f"  - Shape: {df.shape}")
-    print(f"  - Label distribution:")
-    print(df['label'].value_counts())
+    print(f"  - ゲームへの評価の分布:")
+    print(df['game_rating'].value_counts())
 
     # Verify
     if len(df) == 10:  # 5 positive + 5 negative
-        label_counts = df['label'].value_counts()
+        label_counts = df['game_rating'].value_counts()
         if label_counts[0] == 5 and label_counts[1] == 5:
-            print(f"✅ Validation dataset is correctly balanced")
+            print(f"✅ 検証用データセットが正しくバランスされました")
             return True
 
-    print(f"❌ Validation dataset is not correctly balanced")
+    print(f"❌ 検証用データセットが正しくバランスされていません")
     return False
 
 
 def test_save_cleaned_data():
     """Test saving cleaned data to CSV"""
     print("\n" + "=" * 60)
-    print("Test 5: Save cleaned data to CSV")
+    print("テスト5: クリーニング済みデータをCSVに保存")
     print("=" * 60)
 
     # Load sample data
     sample_file = 'data/raw/sample_reviews.json'
     if not os.path.exists(sample_file):
-        print(f"❌ Sample data not found: {sample_file}")
+        print(f"❌ サンプルデータが見つかりません: {sample_file}")
         return False
 
     with open(sample_file, 'r', encoding='utf-8') as f:
@@ -195,52 +195,52 @@ def test_save_cleaned_data():
     output_path = 'data/validation/reviews_cleaned.csv'
     df.to_csv(output_path, index=False, encoding='utf-8')
 
-    print(f"✅ Saved {len(df)} cleaned reviews to {output_path}")
-    print(f"  - File size: {os.path.getsize(output_path)} bytes")
+    print(f"✅ {len(df)}件のクリーニング済みレビューを保存しました: {output_path}")
+    print(f"  - ファイルサイズ: {os.path.getsize(output_path)} bytes")
 
     # Verify by loading
     df_loaded = pd.read_csv(output_path)
     if len(df_loaded) == len(df):
-        print(f"✅ Verified: CSV file loaded correctly")
+        print(f"✅ 検証完了: CSVファイルが正しく読み込まれました")
         return True
     else:
-        print(f"❌ CSV file verification failed")
+        print(f"❌ CSVファイルの検証に失敗しました")
         return False
 
 
 def main():
     """Run all tests"""
     print("\n" + "🧹 " * 20)
-    print("Data Preprocessing Tests")
+    print("データ前処理テスト")
     print("🧹 " * 20 + "\n")
 
     results = []
 
     # Run tests
-    results.append(("Text cleaning", test_clean_review_text()))
-    results.append(("DataFrame conversion", test_steam_reviews_to_dataframe()))
-    results.append(("Dataset balancing", test_balance_dataset()))
-    results.append(("Validation dataset prep", test_prepare_validation_dataset()))
-    results.append(("Save cleaned data", test_save_cleaned_data()))
+    results.append(("テキストクリーニング", test_clean_review_text()))
+    results.append(("DataFrame変換", test_steam_reviews_to_dataframe()))
+    results.append(("データセットバランシング", test_balance_dataset()))
+    results.append(("検証用データセット準備", test_prepare_validation_dataset()))
+    results.append(("クリーニング済みデータ保存", test_save_cleaned_data()))
 
     # Summary
     print("\n" + "=" * 60)
-    print("Test Summary")
+    print("テスト結果サマリー")
     print("=" * 60)
 
     for test_name, passed in results:
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = "✅ 成功" if passed else "❌ 失敗"
         print(f"{status} - {test_name}")
 
     total = len(results)
     passed = sum(1 for _, p in results if p)
-    print(f"\nTotal: {passed}/{total} tests passed")
+    print(f"\n合計: {passed}/{total} テスト成功")
 
     if passed == total:
-        print("\n🎉 All tests passed!")
+        print("\n🎉 すべてのテストが成功しました！")
         return 0
     else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
+        print(f"\n⚠️  {total - passed} テスト失敗")
         return 1
 
 

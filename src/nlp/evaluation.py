@@ -62,29 +62,29 @@ def evaluate_sentiment_model(y_true: List[int], y_pred: List[int]) -> Dict[str, 
     }
 
 
-def print_evaluation_metrics(results: Dict[str, float], language: str = "Model") -> None:
+def print_evaluation_metrics(results: Dict[str, float], language: str = "モデル") -> None:
     """
     Print evaluation metrics in a formatted way
 
     Args:
         results: Dictionary from evaluate_sentiment_model()
-        language: Language name for display (e.g., "English", "Japanese")
+        language: Language name for display (e.g., "英語", "日本語")
 
     Example:
         >>> results = {'accuracy': 0.92, 'precision': 0.90, 'recall': 0.95, 'f1_score': 0.92, ...}
-        >>> print_evaluation_metrics(results, "English")
+        >>> print_evaluation_metrics(results, "英語")
     """
     print(f"\n{'=' * 60}")
-    print(f"{language} Model Evaluation Results")
+    print(f"{language}モデル評価結果")
     print(f"{'=' * 60}")
-    print(f"Accuracy:  {results['accuracy']:.2%}")
-    print(f"Precision: {results['precision']:.2%}")
-    print(f"Recall:    {results['recall']:.2%}")
-    print(f"F1 Score:  {results['f1_score']:.2%}")
+    print(f"正解率（Accuracy）:  {results['accuracy']:.2%}")
+    print(f"適合率（Precision）: {results['precision']:.2%}")
+    print(f"再現率（Recall）:    {results['recall']:.2%}")
+    print(f"F1スコア:            {results['f1_score']:.2%}")
 
     # Print confusion matrix
     cm = results['confusion_matrix']
-    print(f"\nConfusion Matrix:")
+    print(f"\n混同行列（Confusion Matrix）:")
     print(f"                 Predicted")
     print(f"                 Neg    Pos")
     print(f"Actual  Neg    [{cm[0][0]:4d}] [{cm[0][1]:4d}]")
@@ -106,26 +106,32 @@ def print_comparison_report(
         >>> print_comparison_report(results_en, results_ja)
     """
     print("\n" + "=" * 60)
-    print("Language Comparison Report")
+    print("言語比較レポート")
     print("=" * 60)
 
     # Table header
-    print(f"\n{'Metric':<15} {'English':<12} {'Japanese':<12} {'Difference':<12}")
+    print(f"\n{'評価指標':<15} {'英語':<12} {'日本語':<12} {'差分':<12}")
     print("-" * 60)
 
     # Metrics
     metrics = ['accuracy', 'precision', 'recall', 'f1_score']
+    metric_names = {
+        'accuracy': '正解率',
+        'precision': '適合率',
+        'recall': '再現率',
+        'f1_score': 'F1スコア'
+    }
     for metric in metrics:
         en_val = results_en[metric]
         ja_val = results_ja[metric]
         diff = en_val - ja_val
         diff_str = f"{diff:+.2%}" if diff != 0 else " 0.00%"
 
-        print(f"{metric.capitalize():<15} {en_val:>10.2%}  {ja_val:>10.2%}  {diff_str:>10}")
+        print(f"{metric_names[metric]:<15} {en_val:>10.2%}  {ja_val:>10.2%}  {diff_str:>10}")
 
     # Interpretation
     print("\n" + "=" * 60)
-    print("Interpretation")
+    print("評価")
     print("=" * 60)
 
     en_acc = results_en['accuracy']
@@ -133,45 +139,45 @@ def print_comparison_report(
 
     # English model assessment
     if en_acc >= 0.90:
-        en_status = "✅ Excellent (≥90%)"
+        en_status = "✅ 優秀 (≥90%)"
     elif en_acc >= 0.85:
-        en_status = "✅ Good (≥85%)"
+        en_status = "✅ 良好 (≥85%)"
     elif en_acc >= 0.80:
-        en_status = "⚠️  Acceptable (≥80%)"
+        en_status = "⚠️  許容範囲 (≥80%)"
     else:
-        en_status = "❌ Poor (<80%)"
+        en_status = "❌ 不良 (<80%)"
 
     # Japanese model assessment
     if ja_acc >= 0.85:
-        ja_status = "✅ Excellent (≥85%)"
+        ja_status = "✅ 優秀 (≥85%)"
     elif ja_acc >= 0.80:
-        ja_status = "⚠️  Acceptable (≥80%)"
+        ja_status = "⚠️  許容範囲 (≥80%)"
     else:
-        ja_status = "❌ Poor (<80%)"
+        ja_status = "❌ 不良 (<80%)"
 
-    print(f"English Model:  {en_status}")
-    print(f"Japanese Model: {ja_status}")
+    print(f"英語モデル:   {en_status}")
+    print(f"日本語モデル: {ja_status}")
 
     # Recommendation
     print("\n" + "=" * 60)
-    print("Recommendation")
+    print("推奨事項")
     print("=" * 60)
 
     if en_acc >= 0.90 and ja_acc >= 0.85:
-        print("✅ Both models perform well. Choose based on target market:")
-        print("   - English: Broader dataset, more general insights")
-        print("   - Japanese: Japan-specific insights")
+        print("✅ 両モデルとも良好な性能です。ターゲット市場に基づいて選択してください:")
+        print("   - 英語: より広範なデータセット、一般的な洞察")
+        print("   - 日本語: 日本市場特有の洞察")
     elif en_acc >= 0.90 and ja_acc < 0.85:
-        print("✅ Recommend using English model:")
-        print(f"   - English accuracy ({en_acc:.2%}) is significantly better")
-        print(f"   - Japanese accuracy ({ja_acc:.2%}) may not be reliable")
+        print("✅ 英語モデルの使用を推奨:")
+        print(f"   - 英語の正解率 ({en_acc:.2%}) が大幅に高い")
+        print(f"   - 日本語の正解率 ({ja_acc:.2%}) は信頼性が低い可能性")
     elif en_acc < 0.85:
-        print("❌ Both models have low accuracy. Investigate:")
-        print("   - Data quality issues")
-        print("   - Model selection (try different models)")
-        print("   - Implementation bugs")
+        print("❌ 両モデルの正解率が低いです。以下を調査してください:")
+        print("   - データ品質の問題")
+        print("   - モデル選択（別のモデルを試す）")
+        print("   - 実装のバグ")
     else:
-        print("⚠️  Review both models carefully before deciding")
+        print("⚠️  判断する前に両モデルを慎重に確認してください")
 
 
 def calculate_error_rate_by_class(
@@ -220,7 +226,7 @@ def calculate_error_rate_by_class(
 def print_detailed_classification_report(
     y_true: List[int],
     y_pred: List[int],
-    language: str = "Model"
+    language: str = "モデル"
 ) -> None:
     """
     Print detailed classification report with sklearn
@@ -231,10 +237,10 @@ def print_detailed_classification_report(
         language: Language name for display
 
     Example:
-        >>> print_detailed_classification_report(y_true, y_pred, "English")
+        >>> print_detailed_classification_report(y_true, y_pred, "英語")
     """
     print(f"\n{'=' * 60}")
-    print(f"{language} - Detailed Classification Report")
+    print(f"{language} - 詳細分類レポート")
     print(f"{'=' * 60}")
 
     # sklearn classification report
@@ -245,6 +251,6 @@ def print_detailed_classification_report(
     # Per-class accuracy
     class_stats = calculate_error_rate_by_class(y_true, y_pred)
 
-    print(f"\nPer-Class Accuracy:")
+    print(f"\nクラス別正解率:")
     for class_name, (correct, total, acc) in class_stats.items():
         print(f"  {class_name.capitalize()}: {correct}/{total} = {acc:.2%}")
