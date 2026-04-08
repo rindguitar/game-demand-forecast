@@ -1,21 +1,21 @@
 """
-Test script for Steam API data collection
+Steam APIデータ収集のテストスクリプト
 
-This script tests the steam_collector module with a small sample.
+steam_collectorモジュールを少量のサンプルでテストします。
 """
 
 import sys
 import os
 import json
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# srcをパスに追加
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.data.steam_collector import get_steam_reviews, collect_balanced_reviews
 
 
 def test_basic_collection():
-    """Test basic review collection"""
+    """基本的なreview収集のテスト"""
     print("=" * 60)
     print("Test 1: Basic review collection (10 reviews)")
     print("=" * 60)
@@ -49,7 +49,7 @@ def test_basic_collection():
 
 
 def test_japanese_collection():
-    """Test Japanese review collection"""
+    """日本語reviewの収集テスト"""
     print("\n" + "=" * 60)
     print("Test 2: Japanese review collection (5 reviews)")
     print("=" * 60)
@@ -80,7 +80,7 @@ def test_japanese_collection():
 
 
 def test_balanced_collection():
-    """Test balanced positive/negative collection"""
+    """balancedなpositive/negative収集のテスト"""
     print("\n" + "=" * 60)
     print("Test 3: Balanced collection (5 positive + 5 negative)")
     print("=" * 60)
@@ -118,7 +118,7 @@ def test_balanced_collection():
 
 
 def test_save_sample_data():
-    """Save sample data to data/raw/"""
+    """sampleデータをdata/raw/に保存"""
     print("\n" + "=" * 60)
     print("Test 4: Save sample data to data/raw/")
     print("=" * 60)
@@ -153,7 +153,7 @@ def test_save_sample_data():
 
 
 def main():
-    """Run all tests"""
+    """全テスト実行"""
     print("\n" + "🚀 " * 20)
     print("Steam API Data Collection Tests")
     print("🚀 " * 20 + "\n")

@@ -1,7 +1,7 @@
 """
-Steam API data collector for game reviews
+Steam APIゲームレビュー収集モジュール
 
-This module provides functions to collect game reviews from Steam API.
+Steam APIからゲームレビューを収集する機能を提供します。
 """
 
 import requests
@@ -17,27 +17,27 @@ def get_steam_reviews(
     max_retries: int = 3
 ) -> List[Dict]:
     """
-    Collect reviews from Steam API
+    Steam APIからレビューを収集
 
     Args:
-        app_id: Steam game ID (e.g., 730 for CS:GO, 570 for Dota 2)
-        language: 'english' or 'japanese' or 'all'
-        review_type: 'positive', 'negative', or 'all'
-        num: Number of reviews to collect
-        max_retries: Maximum number of API retry attempts
+        app_id: SteamゲームID（例: 730=CS:GO, 570=Dota 2）
+        language: 'english', 'japanese', 'all'のいずれか
+        review_type: 'positive', 'negative', 'all'のいずれか
+        num: 収集するレビュー数
+        max_retries: API retry試行回数の上限
 
     Returns:
-        List of review dictionaries containing:
-            - review_text: Review content
-            - voted_up: True=Recommended, False=Not Recommended
-            - votes_up: Number of upvotes
-            - language: Review language
-            - timestamp_created: Review creation timestamp
-            - author: Author's Steam ID
+        レビューのdictリスト、各dictは以下を含む:
+            - review_text: レビュー本文
+            - voted_up: True=おすすめ, False=おすすめしない
+            - votes_up: 高評価数
+            - language: レビューの言語
+            - timestamp_created: レビュー作成時刻
+            - author: 投稿者のSteam ID
 
     Raises:
-        ValueError: If app_id is invalid or parameters are incorrect
-        requests.exceptions.RequestException: If API request fails
+        ValueError: app_idまたはパラメータが不正な場合
+        requests.exceptions.RequestException: APIリクエスト失敗時
 
     Example:
         >>> reviews = get_steam_reviews(app_id=730, language='english', num=100)
@@ -55,26 +55,26 @@ def get_steam_reviews(
     if num <= 0:
         raise ValueError(f"Invalid num: {num}. Must be positive")
 
-    # Steam API endpoint
+    # Steam APIエンドポイント
     base_url = "https://store.steampowered.com/appreviews/"
 
-    # API parameters
+    # APIパラメータ
     params = {
         'json': 1,
         'language': language,
-        'filter': 'recent',  # Get recent reviews
+        'filter': 'recent',  # 最新レビューを取得
         'review_type': review_type,
         'purchase_type': 'all',
-        'num_per_page': min(100, num),  # API max is 100 per request
+        'num_per_page': min(100, num),  # APIの上限は1リクエスト100件
     }
 
     reviews = []
-    cursor = '*'  # Initial cursor
+    cursor = '*'  # 初期cursor
 
     while len(reviews) < num:
         params['cursor'] = cursor
 
-        # API request with retries
+        # retry付きAPIリクエスト
         for attempt in range(max_retries):
             try:
                 response = requests.get(f"{base_url}{app_id}", params=params, timeout=10)
@@ -86,18 +86,18 @@ def get_steam_reviews(
                     raise requests.exceptions.RequestException(
                         f"Failed to fetch reviews after {max_retries} attempts: {e}"
                     )
-                time.sleep(1)  # Wait before retry
+                time.sleep(1)  # retry前の待機
 
-        # Check API response
+        # APIレスポンス確認
         if data.get('success') != 1:
             raise requests.exceptions.RequestException(
                 f"Steam API returned error: {data.get('error', 'Unknown error')}"
             )
 
-        # Extract reviews
+        # レビュー抽出
         api_reviews = data.get('reviews', [])
         if not api_reviews:
-            break  # No more reviews available
+            break  # これ以上レビューなし
 
         for review in api_reviews:
             if len(reviews) >= num:
@@ -112,12 +112,12 @@ def get_steam_reviews(
                 'author': review.get('author', {}).get('steamid', ''),
             })
 
-        # Get next cursor
+        # 次のcursorを取得
         cursor = data.get('cursor')
         if not cursor:
-            break  # No more pages
+            break  # ページなし
 
-        # Rate limiting: respect Steam API
+        # Rate limiting: Steam APIを尊重
         time.sleep(0.5)
 
     return reviews
@@ -130,16 +130,16 @@ def collect_balanced_reviews(
     n_negative: int = 50
 ) -> Dict[str, List[Dict]]:
     """
-    Collect balanced positive and negative reviews for validation
+    検証用にbalancedなpositive/negativeレビューを収集
 
     Args:
-        app_id: Steam game ID
-        language: 'english' or 'japanese'
-        n_positive: Number of positive reviews (Recommended)
-        n_negative: Number of negative reviews (Not Recommended)
+        app_id: SteamゲームID
+        language: 'english'または'japanese'
+        n_positive: positiveレビュー数（おすすめ）
+        n_negative: negativeレビュー数（おすすめしない）
 
     Returns:
-        Dictionary with keys 'positive' and 'negative', each containing list of reviews
+        'positive'と'negative'をkeyとするdict、各valueはレビューのリスト
 
     Example:
         >>> reviews = collect_balanced_reviews(app_id=730, language='english')
