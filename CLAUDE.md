@@ -208,6 +208,10 @@ Steam APIキーの取得: https://steamcommunity.com/dev/apikey
 - **docstring**: 関数・クラスの説明は日本語で記述
 - **インラインコメント**: `#`コメントも日本語で記述
 - **変数名・関数名**: 英語のまま（Pythonの慣例に従う）
+- **技術用語**: 無理に日本語訳せず、英語のままかカタカナ読みを使用
+  - 良い例: `def test_perfect_predictions()` → `"""perfect predictionsのテスト"""`
+  - 悪い例: `"""完璧な予測のテスト"""` （ぎこちない日本語）
+  - 技術用語の例: accuracy, precision, recall, F1 score, batch, pipeline, model, dataset, など
 
 **例**:
 ```python

@@ -1,8 +1,8 @@
 """
-Data preprocessing module for Steam reviews
+Steamレビューのデータ前処理モジュール
 
-This module provides functions to clean and transform Steam API responses
-into structured data suitable for sentiment analysis.
+Steam APIレスポンスをクリーニングし、感情分析に適した
+構造化データに変換する機能を提供します。
 """
 
 import re
@@ -12,16 +12,16 @@ from typing import List, Dict
 
 def clean_review_text(text: str) -> str:
     """
-    Clean review text for sentiment analysis
+    感情分析用にレビューテキストをクリーニング
 
     Args:
-        text: Raw review text from Steam API
+        text: Steam APIから取得した生のレビューテキスト
 
     Returns:
-        Cleaned text with:
-            - HTML tags removed
-            - Multiple whitespaces normalized
-            - Leading/trailing whitespace removed
+        クリーニングされたテキスト:
+            - HTMLタグ除去済み
+            - 連続する空白を正規化
+            - 先頭・末尾の空白を削除
 
     Example:
         >>> clean_review_text("<b>Great game!</b>  ")
@@ -30,13 +30,13 @@ def clean_review_text(text: str) -> str:
     if not isinstance(text, str):
         return ""
 
-    # Remove HTML tags
+    # HTMLタグを除去
     text = re.sub(r'<[^>]+>', '', text)
 
-    # Normalize whitespace (replace multiple spaces/newlines with single space)
+    # 空白を正規化（複数のスペース/改行を単一スペースに）
     text = re.sub(r'\s+', ' ', text)
 
-    # Remove leading/trailing whitespace
+    # 先頭・末尾の空白を削除
     text = text.strip()
 
     return text
@@ -44,20 +44,20 @@ def clean_review_text(text: str) -> str:
 
 def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
     """
-    Convert Steam API review response to pandas DataFrame
+    Steam APIレビューレスポンスをpandas DataFrameに変換
 
     Args:
-        reviews: List of review dictionaries from Steam API
-                 Each dict should have: review_text, voted_up, votes_up, language, etc.
+        reviews: Steam APIから取得したレビューのdictリスト
+                 各dictは以下を含む: review_text, voted_up, votes_up, language等
 
     Returns:
-        DataFrame with columns:
-            - review_text: Cleaned review text (レビュー本文)
-            - game_rating: Binary label (1=Recommended/おすすめ, 0=Not Recommended/おすすめしない)
-            - review_helpfulness: Number of upvotes (役に立った投票数)
-            - language: Review language (言語)
-            - posted_date: Review creation timestamp (投稿日時)
-            - user_id: Author's Steam ID (ユーザーID)
+        以下のカラムを持つDataFrame:
+            - review_text: クリーニング済みレビュー本文
+            - game_rating: バイナリラベル（1=おすすめ, 0=おすすめしない）
+            - review_helpfulness: 高評価数
+            - language: レビューの言語
+            - posted_date: レビュー作成timestamp
+            - user_id: 投稿者のSteam ID
 
     Example:
         >>> reviews = [{'review_text': 'Great!', 'voted_up': True, ...}]
@@ -68,13 +68,13 @@ def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
     if not reviews:
         return pd.DataFrame()
 
-    # Extract relevant fields
+    # 関連フィールドを抽出
     data = []
     for review in reviews:
         data.append({
             'review_text': clean_review_text(review.get('review_text', '')),
-            'game_rating': 1 if review.get('voted_up', False) else 0,  # 1=Recommended, 0=Not Recommended
-            'review_helpfulness': review.get('votes_up', 0),  # Number of upvotes
+            'game_rating': 1 if review.get('voted_up', False) else 0,  # 1=おすすめ, 0=おすすめしない
+            'review_helpfulness': review.get('votes_up', 0),  # 高評価数
             'language': review.get('language', ''),
             'posted_date': review.get('timestamp_created', 0),
             'user_id': review.get('author', ''),
@@ -82,7 +82,7 @@ def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
 
     df = pd.DataFrame(data)
 
-    # Filter out empty reviews
+    # 空のレビューを除外
     df = df[df['review_text'].str.len() > 0]
 
     return df
@@ -90,14 +90,14 @@ def steam_reviews_to_dataframe(reviews: List[Dict]) -> pd.DataFrame:
 
 def balance_dataset(df: pd.DataFrame, n_samples_per_class: int = None) -> pd.DataFrame:
     """
-    Balance dataset by sampling equal number of positive and negative reviews
+    positive/negativeレビューを同数samplingしてdatasetをバランス化
 
     Args:
-        df: DataFrame with 'game_rating' column (0 or 1)
-        n_samples_per_class: Number of samples per class (if None, use minimum class size)
+        df: 'game_rating'カラム（0または1）を持つDataFrame
+        n_samples_per_class: クラスごとのsample数（Noneの場合、最小クラスサイズを使用）
 
     Returns:
-        Balanced DataFrame with equal number of positive and negative reviews
+        positive/negativeが同数のbalanced DataFrame
 
     Example:
         >>> df = pd.DataFrame({'game_rating': [1, 1, 1, 0], 'review_text': ['a', 'b', 'c', 'd']})
@@ -109,25 +109,25 @@ def balance_dataset(df: pd.DataFrame, n_samples_per_class: int = None) -> pd.Dat
     if df.empty:
         return df
 
-    # Count samples per class
+    # クラスごとのsample数をカウント
     positive_df = df[df['game_rating'] == 1]
     negative_df = df[df['game_rating'] == 0]
 
     n_positive = len(positive_df)
     n_negative = len(negative_df)
 
-    # Determine sample size
+    # sample数を決定
     if n_samples_per_class is None:
         n_samples_per_class = min(n_positive, n_negative)
 
     if n_samples_per_class <= 0:
         return pd.DataFrame()
 
-    # Sample equal number from each class
+    # 各クラスから同数sampling
     positive_sampled = positive_df.sample(n=min(n_samples_per_class, n_positive), random_state=42)
     negative_sampled = negative_df.sample(n=min(n_samples_per_class, n_negative), random_state=42)
 
-    # Combine and shuffle
+    # 結合してシャッフル
     balanced_df = pd.concat([positive_sampled, negative_sampled])
     balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
@@ -140,15 +140,15 @@ def prepare_validation_dataset(
     n_per_class: int = 50
 ) -> pd.DataFrame:
     """
-    Prepare balanced validation dataset from positive and negative reviews
+    positive/negativeレビューからbalancedな検証用datasetを作成
 
     Args:
-        positive_reviews: List of positive review dicts from Steam API
-        negative_reviews: List of negative review dicts from Steam API
-        n_per_class: Number of samples per class (default: 50)
+        positive_reviews: Steam APIから取得したpositiveレビューのdictリスト
+        negative_reviews: Steam APIから取得したnegativeレビューのdictリスト
+        n_per_class: クラスごとのsample数（デフォルト: 50）
 
     Returns:
-        Balanced DataFrame ready for sentiment analysis validation
+        感情分析検証用のbalanced DataFrame
 
     Example:
         >>> pos = [{'review_text': 'Good!', 'voted_up': True, ...}]
@@ -160,14 +160,14 @@ def prepare_validation_dataset(
         0    10
         1    10
     """
-    # Convert to DataFrames
+    # DataFrameに変換
     df_positive = steam_reviews_to_dataframe(positive_reviews)
     df_negative = steam_reviews_to_dataframe(negative_reviews)
 
-    # Combine
+    # 結合
     df = pd.concat([df_positive, df_negative])
 
-    # Balance
+    # バランス化
     df_balanced = balance_dataset(df, n_samples_per_class=n_per_class)
 
     return df_balanced

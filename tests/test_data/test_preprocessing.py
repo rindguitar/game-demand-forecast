@@ -1,15 +1,16 @@
 """
-Test script for data preprocessing module
+データ前処理モジュールのテストスクリプト
 
-This script tests the preprocessing module with sample data.
+sampleデータを使用してpreprocessingモジュールをテストします。
 """
 
 import sys
 import os
 import json
+import pandas as pd
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# srcをパスに追加
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.data.preprocessing import (
     clean_review_text,
@@ -20,7 +21,7 @@ from src.data.preprocessing import (
 
 
 def test_clean_review_text():
-    """Test text cleaning function"""
+    """テキストクリーニング機能のテスト"""
     print("=" * 60)
     print("テスト1: テキストクリーニング")
     print("=" * 60)
@@ -47,7 +48,7 @@ def test_clean_review_text():
 
 
 def test_steam_reviews_to_dataframe():
-    """Test DataFrame conversion"""
+    """DataFrame変換のテスト"""
     print("\n" + "=" * 60)
     print("テスト2: SteamレビューからDataFrameへの変換")
     print("=" * 60)
@@ -98,7 +99,7 @@ def test_steam_reviews_to_dataframe():
 
 
 def test_balance_dataset():
-    """Test dataset balancing"""
+    """datasetバランシングのテスト"""
     print("\n" + "=" * 60)
     print("テスト3: データセットバランシング")
     print("=" * 60)
@@ -135,7 +136,7 @@ def test_balance_dataset():
 
 
 def test_prepare_validation_dataset():
-    """Test validation dataset preparation"""
+    """検証用dataset準備のテスト"""
     print("\n" + "=" * 60)
     print("テスト4: 検証用データセット準備")
     print("=" * 60)
@@ -171,7 +172,7 @@ def test_prepare_validation_dataset():
 
 
 def test_save_cleaned_data():
-    """Test saving cleaned data to CSV"""
+    """クリーニング済みデータのCSV保存テスト"""
     print("\n" + "=" * 60)
     print("テスト5: クリーニング済みデータをCSVに保存")
     print("=" * 60)
@@ -209,7 +210,7 @@ def test_save_cleaned_data():
 
 
 def main():
-    """Run all tests"""
+    """全テスト実行"""
     print("\n" + "🧹 " * 20)
     print("データ前処理テスト")
     print("🧹 " * 20 + "\n")
@@ -245,6 +246,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # Import pandas here to avoid import error if not installed
-    import pandas as pd
     exit(main())

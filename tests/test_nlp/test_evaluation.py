@@ -1,13 +1,13 @@
 """
-Test script for evaluation module
+評価モジュールのテストスクリプト
 
-This script tests the evaluation module with dummy data.
+ダミーデータを使用して評価モジュールの機能をテストします。
 """
 
 import sys
 import os
 
-# Add src to path
+# srcをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.nlp.evaluation import (
@@ -20,7 +20,7 @@ from src.nlp.evaluation import (
 
 
 def test_perfect_predictions():
-    """Test with perfect predictions (100% accuracy)"""
+    """perfect predictionsのテスト（精度100%）"""
     print("=" * 60)
     print("Test 1: Perfect predictions (100% accuracy)")
     print("=" * 60)
@@ -49,7 +49,7 @@ def test_perfect_predictions():
 
 
 def test_imperfect_predictions():
-    """Test with realistic predictions (80% accuracy)"""
+    """imperfect predictionsのテスト（accuracy約80%）"""
     print("\n" + "=" * 60)
     print("Test 2: Imperfect predictions (~80% accuracy)")
     print("=" * 60)
@@ -77,7 +77,7 @@ def test_imperfect_predictions():
 
 
 def test_class_imbalance():
-    """Test with class imbalance"""
+    """class imbalanceのテスト"""
     print("\n" + "=" * 60)
     print("Test 3: Class imbalance (7 positive, 3 negative)")
     print("=" * 60)
@@ -106,7 +106,7 @@ def test_class_imbalance():
 
 
 def test_comparison_report():
-    """Test comparison report for English vs Japanese"""
+    """comparison reportのテスト（English vs Japanese）"""
     print("\n" + "=" * 60)
     print("Test 4: Language comparison report")
     print("=" * 60)
@@ -144,7 +144,7 @@ def test_comparison_report():
 
 
 def test_detailed_classification_report():
-    """Test detailed classification report"""
+    """詳細なclassification reportのテスト"""
     print("\n" + "=" * 60)
     print("Test 5: Detailed classification report")
     print("=" * 60)
@@ -162,7 +162,7 @@ def test_detailed_classification_report():
 
 
 def test_edge_cases():
-    """Test edge cases"""
+    """edge casesのテスト"""
     print("\n" + "=" * 60)
     print("Test 6: Edge cases")
     print("=" * 60)
@@ -207,7 +207,7 @@ def test_edge_cases():
 
 
 def main():
-    """Run all tests"""
+    """全テスト実行"""
     print("\n" + "📊 " * 20)
     print("Evaluation Module Tests")
     print("📊 " * 20 + "\n")
