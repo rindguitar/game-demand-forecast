@@ -1,5 +1,5 @@
 # データファイル
-data/
+/data/
 !data/raw/.gitkeep
 !data/validation/.gitkeep
 *.csv
