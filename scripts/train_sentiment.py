@@ -6,6 +6,7 @@ DistilBERTをSteamレビューでファインチューニングする。
 
 import sys
 import os
+import argparse
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -22,8 +23,19 @@ from src.nlp.evaluation import evaluate_sentiment_model, print_evaluation_metric
 def main():
     """学習メイン関数"""
 
+    # コマンドライン引数
+    parser = argparse.ArgumentParser(description='DistilBERT感情分析モデル学習')
+    parser.add_argument('--dataset-size', type=int, default=1000, choices=[1000, 5000],
+                        help='Dataset size (1000 or 5000)')
+    args = parser.parse_args()
+
+    dataset_size = args.dataset_size
+    train_size = int(dataset_size * 0.7)
+    val_size = int(dataset_size * 0.15)
+    test_size = int(dataset_size * 0.15)
+
     print("=" * 60)
-    print("DistilBERT 感情分析モデル学習")
+    print(f"DistilBERT 感情分析モデル学習 (Dataset: {dataset_size}件)")
     print("=" * 60)
 
     # デバイス確認
@@ -40,9 +52,9 @@ def main():
     print("=" * 60)
 
     train_df, val_df, test_df = load_datasets_from_csv(
-        'data/train/train_700.csv',
-        'data/train/val_150.csv',
-        'data/train/test_150.csv'
+        f'data/train/train_{train_size}.csv',
+        f'data/train/val_{val_size}.csv',
+        f'data/train/test_{test_size}.csv'
     )
 
     print(f"✅ Train: {len(train_df)} reviews")
