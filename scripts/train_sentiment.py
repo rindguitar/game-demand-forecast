@@ -57,9 +57,18 @@ def main():
         f'data/train/test_{test_size}.csv'
     )
 
-    print(f"✅ Train: {len(train_df)} reviews")
-    print(f"✅ Val: {len(val_df)} reviews")
-    print(f"✅ Test: {len(test_df)} reviews")
+    # NaN除去
+    train_orig = len(train_df)
+    val_orig = len(val_df)
+    test_orig = len(test_df)
+
+    train_df = train_df.dropna(subset=['review_text'])
+    val_df = val_df.dropna(subset=['review_text'])
+    test_df = test_df.dropna(subset=['review_text'])
+
+    print(f"✅ Train: {len(train_df)} reviews (removed {train_orig - len(train_df)} NaN)")
+    print(f"✅ Val: {len(val_df)} reviews (removed {val_orig - len(val_df)} NaN)")
+    print(f"✅ Test: {len(test_df)} reviews (removed {test_orig - len(test_df)} NaN)")
 
     # 2. Tokenizer & DataLoader
     print("\n" + "=" * 60)
