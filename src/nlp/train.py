@@ -109,7 +109,7 @@ def train_model(
     device: str = 'cuda',
     patience: int = 2,
     model_save_path: str = 'models/sentiment_model/best_model.pth'
-) -> nn.Module:
+) -> Tuple[nn.Module, int]:
     """
     学習メイン関数（Early Stopping対応）
 
@@ -124,12 +124,12 @@ def train_model(
         model_save_path: ベストmodelの保存パス
 
     Returns:
-        学習済みmodel（ベストmodelの重みを読み込み済み）
+        (学習済みmodel（ベストmodelの重みを読み込み済み）, best_epoch)
 
     Example:
         >>> model = SentimentClassifier()
         >>> model.to('cuda')
-        >>> trained_model = train_model(
+        >>> trained_model, best_epoch = train_model(
         ...     model, train_loader, val_loader,
         ...     epochs=5, lr=2e-5, device='cuda', patience=2
         ... )
@@ -140,6 +140,7 @@ def train_model(
     optimizer = AdamW(model.parameters(), lr=lr)
 
     best_val_accuracy = 0.0
+    best_epoch = 0
     patience_counter = 0
     training_history = []
 
@@ -183,6 +184,7 @@ def train_model(
         # Early Stopping
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
+            best_epoch = epoch + 1
             patience_counter = 0
             # ベストmodelを保存
             torch.save(model.state_dict(), model_save_path)
@@ -203,10 +205,10 @@ def train_model(
     print("\n" + "=" * 60)
     print("学習完了サマリー")
     print("=" * 60)
-    print(f"Best Val Accuracy: {best_val_accuracy:.2%}")
+    print(f"Best Val Accuracy: {best_val_accuracy:.2%} (Epoch {best_epoch})")
     print(f"Total Epochs: {len(training_history)}")
     total_time = sum(h['time'] for h in training_history)
     print(f"Total Time: {total_time:.1f}s ({total_time/60:.2f}min)")
     print("=" * 60)
 
-    return model
+    return model, best_epoch
