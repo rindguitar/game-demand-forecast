@@ -99,7 +99,7 @@ def main():
     print("4. 学習実行")
     print("=" * 60)
 
-    trained_model = train_model(
+    trained_model, best_epoch = train_model(
         model,
         train_loader,
         val_loader,

@@ -10,7 +10,8 @@
 numpy
 pandas
 scikit-learn      # 機械学習（評価指標等）
-# - matplotlib
+matplotlib        # グラフ可視化
+seaborn           # 統計的可視化
 # - scipy
 
 # Phase 2: Data Collection
