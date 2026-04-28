@@ -108,7 +108,8 @@ def train_model(
     lr: float = 2e-5,
     device: str = 'cuda',
     patience: int = 2,
-    model_save_path: str = 'models/sentiment_model/best_model.pth'
+    model_save_path: str = 'models/sentiment_model/best_model.pth',
+    test_loader: DataLoader = None
 ) -> Tuple[nn.Module, int]:
     """
     学習メイン関数（Early Stopping対応）
@@ -122,6 +123,7 @@ def train_model(
         device: 'cuda'または'cpu'
         patience: Early Stopping patience（デフォルト2）
         model_save_path: ベストmodelの保存パス
+        test_loader: Test DataLoader（省略可。指定時は各エポックでTest精度も記録）
 
     Returns:
         (学習済みmodel（ベストmodelの重みを読み込み済み）, best_epoch)
@@ -131,7 +133,8 @@ def train_model(
         >>> model.to('cuda')
         >>> trained_model, best_epoch = train_model(
         ...     model, train_loader, val_loader,
-        ...     epochs=5, lr=2e-5, device='cuda', patience=2
+        ...     epochs=5, lr=2e-5, device='cuda', patience=2,
+        ...     test_loader=test_loader  # Test精度も記録
         ... )
     """
     import os
@@ -170,16 +173,26 @@ def train_model(
         val_accuracy = (np.array(val_predictions) == np.array(val_labels)).mean()
         print(f"Val Accuracy: {val_accuracy:.2%}")
 
+        # Test評価（test_loaderが指定されている場合）
+        test_accuracy = None
+        if test_loader is not None:
+            test_predictions, test_labels = evaluate(model, test_loader, device)
+            test_accuracy = (np.array(test_predictions) == np.array(test_labels)).mean()
+            print(f"Test Accuracy: {test_accuracy:.2%}")
+
         epoch_time = time.time() - start_time
         print(f"Time: {epoch_time:.1f}s")
 
         # 履歴保存
-        training_history.append({
+        history_entry = {
             'epoch': epoch + 1,
             'train_loss': train_loss,
             'val_accuracy': val_accuracy,
             'time': epoch_time
-        })
+        }
+        if test_accuracy is not None:
+            history_entry['test_accuracy'] = test_accuracy
+        training_history.append(history_entry)
 
         # Early Stopping
         if val_accuracy > best_val_accuracy:
@@ -209,6 +222,14 @@ def train_model(
     print(f"Total Epochs: {len(training_history)}")
     total_time = sum(h['time'] for h in training_history)
     print(f"Total Time: {total_time:.1f}s ({total_time/60:.2f}min)")
+
+    # Test平均精度を表示（test_loaderが指定されている場合）
+    if test_loader is not None:
+        test_accuracies = [h['test_accuracy'] for h in training_history if 'test_accuracy' in h]
+        if test_accuracies:
+            avg_test_accuracy = np.mean(test_accuracies)
+            print(f"Average Test Accuracy (全{len(test_accuracies)}エポック): {avg_test_accuracy:.2%}")
+
     print("=" * 60)
 
     return model, best_epoch

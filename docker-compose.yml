@@ -12,6 +12,7 @@ services:
       - ./data:/app/data
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      - ./models:/app/models
       - ./Makefile:/app/Makefile
     ports:
       - "8888:8888"

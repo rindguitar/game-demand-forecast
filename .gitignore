@@ -7,6 +7,12 @@
 *.sqlite
 *.sqlite3
 
+# モデルファイル
+/models/
+*.pth
+*.pt
+*.ckpt
+
 # 環境変数
 .env
 

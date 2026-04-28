@@ -141,7 +141,8 @@ def train_single_trial(
         epochs=epochs,
         lr=learning_rate,
         device=device,
-        patience=patience
+        patience=patience,
+        test_loader=test_loader  # Test精度も記録
     )
 
     # 5. Train/Val/Test評価
@@ -197,6 +198,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate')
+    parser.add_argument('--patience', type=int, default=2, help='Early stopping patience')
 
     args = parser.parse_args()
 
@@ -206,7 +208,8 @@ def main():
         random_seed=args.seed,
         batch_size=args.batch_size,
         epochs=args.epochs,
-        learning_rate=args.lr
+        learning_rate=args.lr,
+        patience=args.patience
     )
 
     print("\n" + "=" * 70)
