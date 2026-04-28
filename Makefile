@@ -28,9 +28,12 @@ help:
 	@echo "  make clean         - キャッシュ削除"
 	@echo ""
 	@echo "【機械学習】"
-	@echo "  make collect-data  - データ収集"
-	@echo "  make train-prophet - Prophet学習"
-	@echo "  make train-lstm    - LSTM学習"
+	@echo "  make collect-data       - データ収集（Steam API）"
+	@echo "  make train-sentiment    - 感情分析モデル学習（10000件・⚠️best_model上書き）"
+	@echo "  make train-test         - テスト用学習（1000件・test_modelに保存）"
+	@echo "  make train-custom       - カスタム設定で学習"
+	@echo "  make train-prophet      - Prophet学習"
+	@echo "  make train-lstm         - LSTM学習"
 
 # ============================================================
 # Docker操作
@@ -95,9 +98,46 @@ clean:
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".ipynb_checkpoints" -exec rm -rf {} + 2>/dev/null || true
 
+# ============================================================
+# 機械学習
+# ============================================================
 collect-data:
-	python src/data/reddit_collector.py
-	python src/data/steam_collector.py
+	docker-compose exec dev python src/data/steam_collector.py
+
+# 感情分析モデル学習（推奨設定：10000件、seed=42、lr=1e-5）
+# ⚠️ 警告: models/best_model/ を上書きします
+train-sentiment:
+	docker-compose exec dev python scripts/train_single_trial.py \
+		--dataset data/train/reviews_10000.csv \
+		--output models/best_model \
+		--seed 42 \
+		--batch-size 16 \
+		--epochs 10 \
+		--lr 1e-5 \
+		--patience 3
+
+# テスト用学習（best_modelを上書きしない）
+train-test:
+	docker-compose exec dev python scripts/train_single_trial.py \
+		--dataset data/train/reviews_1000.csv \
+		--output models/test_model \
+		--seed 42 \
+		--batch-size 16 \
+		--epochs 3 \
+		--lr 1e-5 \
+		--patience 2
+
+# カスタム設定で学習（変数で設定を上書き可能）
+# 例: make train-custom DATASET=data/train/reviews_5000.csv LR=2e-5
+train-custom:
+	docker-compose exec dev python scripts/train_single_trial.py \
+		--dataset $(DATASET) \
+		--output $(OUTPUT) \
+		--seed $(SEED) \
+		--batch-size $(BATCH_SIZE) \
+		--epochs $(EPOCHS) \
+		--lr $(LR) \
+		--patience $(PATIENCE)
 
 train-prophet:
 	python src/timeseries/prophet_model.py
