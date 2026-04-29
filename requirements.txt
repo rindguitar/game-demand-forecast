@@ -22,8 +22,8 @@ python-dotenv     # 環境変数管理
 # Phase 3-4: NLP
 transformers      # Hugging Face
 # - torch             # PyTorch（Dockerfileでインストール済み）
-# - bertopic          # トピック抽出
-# - sentence-transformers  # 文章埋め込み
+bertopic          # トピック抽出
+sentence-transformers  # 文章埋め込み
 
 # Phase 7: Time Series (Prophet)
 # - prophet           # 時系列予測
