@@ -15,7 +15,7 @@ from pathlib import Path
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from scripts.train_single_trial import train_single_trial
+from scripts.train_sentiment import train_sentiment
 
 
 def run_learning_curve_experiment(
@@ -68,7 +68,7 @@ def run_learning_curve_experiment(
                 os.makedirs(model_dir, exist_ok=True)
 
                 # 学習実行
-                metrics = train_single_trial(
+                metrics = train_sentiment(
                     dataset_path=dataset_path,
                     output_dir=model_dir,
                     random_seed=seed,

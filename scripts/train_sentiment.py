@@ -1,171 +1,226 @@
 """
-感情分析modelの学習実行スクリプト
+感情分析モデル学習スクリプト
 
 DistilBERTをSteamレビューでファインチューニングする。
+learning_curve_experiment.pyからもimport可能。
 """
 
 import sys
 import os
-import argparse
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
+import pandas as pd
 from transformers import AutoTokenizer
+from sklearn.model_selection import train_test_split
 
-from src.nlp.dataset import load_datasets_from_csv, create_dataloaders
+from src.nlp.dataset import create_dataloaders
 from src.nlp.model import SentimentClassifier, save_model
 from src.nlp.train import train_model, evaluate
-from src.nlp.evaluation import evaluate_sentiment_model, print_evaluation_metrics
+from src.nlp.evaluation import evaluate_sentiment_model
 
 
-def main():
-    """学習メイン関数"""
+def train_sentiment(
+    dataset_path: str,
+    output_dir: str,
+    random_seed: int = 42,
+    batch_size: int = 16,
+    epochs: int = 10,
+    learning_rate: float = 2e-5,
+    patience: int = 2,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    verbose: bool = True
+) -> dict:
+    """
+    単一トライアルの学習を実行
 
-    # コマンドライン引数
-    parser = argparse.ArgumentParser(description='DistilBERT感情分析モデル学習')
-    parser.add_argument('--dataset-size', type=int, default=1000, choices=[1000, 5000],
-                        help='Dataset size (1000 or 5000)')
-    args = parser.parse_args()
+    Args:
+        dataset_path: データセットCSVファイルのパス
+        output_dir: モデル保存先ディレクトリ
+        random_seed: ランダムシード
+        batch_size: バッチサイズ
+        epochs: エポック数
+        learning_rate: 学習率
+        patience: Early Stoppingの忍耐値
+        train_ratio: Train setの割合
+        val_ratio: Validation setの割合
+        verbose: 詳細ログ出力
 
-    dataset_size = args.dataset_size
-    train_size = int(dataset_size * 0.7)
-    val_size = int(dataset_size * 0.15)
-    test_size = int(dataset_size * 0.15)
-
-    print("=" * 60)
-    print(f"DistilBERT 感情分析モデル学習 (Dataset: {dataset_size}件)")
-    print("=" * 60)
+    Returns:
+        学習結果のdict（train_acc, val_acc, test_acc, best_epoch等）
+    """
+    if verbose:
+        print(f"\n{'=' * 70}")
+        print(f"学習実行: {dataset_path}")
+        print(f"Random Seed: {random_seed}")
+        print(f"{'=' * 70}")
 
     # デバイス確認
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"\n✅ Device: {device}")
-
-    if device == 'cuda':
-        print(f"   GPU: {torch.cuda.get_device_name(0)}")
-        print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    if verbose:
+        print(f"\n✅ Device: {device}")
+        if device == 'cuda':
+            print(f"   GPU: {torch.cuda.get_device_name(0)}")
 
     # 1. データセット読み込み
-    print("\n" + "=" * 60)
-    print("1. データセット読み込み")
-    print("=" * 60)
+    if verbose:
+        print(f"\n1. データセット読み込み")
 
-    train_df, val_df, test_df = load_datasets_from_csv(
-        f'data/train/train_{train_size}.csv',
-        f'data/train/val_{val_size}.csv',
-        f'data/train/test_{test_size}.csv'
+    df = pd.read_csv(dataset_path)
+
+    # NaN除去
+    df = df.dropna(subset=['review_text'])
+
+    if verbose:
+        print(f"   Total: {len(df)} reviews")
+
+    # Train/Val/Test分割
+    test_ratio = 1.0 - train_ratio - val_ratio
+
+    # Train/Temp分割
+    train_df, temp_df = train_test_split(
+        df,
+        test_size=(val_ratio + test_ratio),
+        random_state=random_seed,
+        stratify=df['label']
     )
 
-    print(f"✅ Train: {len(train_df)} reviews")
-    print(f"✅ Val: {len(val_df)} reviews")
-    print(f"✅ Test: {len(test_df)} reviews")
+    # Val/Test分割
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=(test_ratio / (val_ratio + test_ratio)),
+        random_state=random_seed,
+        stratify=temp_df['label']
+    )
+
+    if verbose:
+        print(f"   Train: {len(train_df)} ({len(train_df)/len(df):.1%})")
+        print(f"   Val:   {len(val_df)} ({len(val_df)/len(df):.1%})")
+        print(f"   Test:  {len(test_df)} ({len(test_df)/len(df):.1%})")
 
     # 2. Tokenizer & DataLoader
-    print("\n" + "=" * 60)
-    print("2. Tokenizer & DataLoader作成")
-    print("=" * 60)
+    if verbose:
+        print(f"\n2. Tokenizer & DataLoader作成")
 
     tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
-    print("✅ Tokenizer loaded")
 
-    batch_size = 64  # ベンチマーク結果からbatch_size=64が最適
     train_loader, val_loader, test_loader = create_dataloaders(
         train_df, val_df, test_df, tokenizer, batch_size=batch_size
     )
 
-    print(f"✅ DataLoader created (batch_size={batch_size})")
-    print(f"   Train batches: {len(train_loader)}")
-    print(f"   Val batches: {len(val_loader)}")
-    print(f"   Test batches: {len(test_loader)}")
+    if verbose:
+        print(f"   Batch size: {batch_size}")
+        print(f"   Train batches: {len(train_loader)}")
+        print(f"   Val batches: {len(val_loader)}")
+        print(f"   Test batches: {len(test_loader)}")
 
     # 3. モデル初期化
-    print("\n" + "=" * 60)
-    print("3. モデル初期化")
-    print("=" * 60)
+    if verbose:
+        print(f"\n3. モデル初期化")
 
     model = SentimentClassifier()
     model.to(device)
 
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    print(f"✅ Model initialized")
-    print(f"   Total parameters: {total_params:,}")
-    print(f"   Trainable parameters: {trainable_params:,}")
+    if verbose:
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"   Total parameters: {total_params:,}")
+        print(f"   Trainable parameters: {trainable_params:,}")
 
     # 4. 学習実行
-    print("\n" + "=" * 60)
-    print("4. 学習実行")
-    print("=" * 60)
+    if verbose:
+        print(f"\n4. 学習実行")
+        print(f"   Epochs: {epochs}, LR: {learning_rate}, Patience: {patience}")
 
     trained_model, best_epoch = train_model(
         model,
         train_loader,
         val_loader,
-        epochs=5,
-        lr=2e-5,
+        epochs=epochs,
+        lr=learning_rate,
         device=device,
-        patience=2
+        patience=patience,
+        test_loader=test_loader  # Test精度も記録
     )
 
     # 5. Train/Val/Test評価
-    print("\n" + "=" * 60)
-    print("5. 全データセットで評価")
-    print("=" * 60)
+    if verbose:
+        print(f"\n5. 評価")
 
     # Train評価
-    print("\n【Train評価】")
     train_predictions, train_labels = evaluate(trained_model, train_loader, device)
     train_results = evaluate_sentiment_model(train_labels, train_predictions)
-    print_evaluation_metrics(train_results, "Train")
 
     # Val評価
-    print("\n【Validation評価】")
     val_predictions, val_labels = evaluate(trained_model, val_loader, device)
     val_results = evaluate_sentiment_model(val_labels, val_predictions)
-    print_evaluation_metrics(val_results, "Validation")
 
-    # Test評価（最終評価）
-    print("\n【Test評価】")
+    # Test評価
     test_predictions, test_labels = evaluate(trained_model, test_loader, device)
     test_results = evaluate_sentiment_model(test_labels, test_predictions)
-    print_evaluation_metrics(test_results, "Test")
 
-    # 6. パフォーマンスサマリー
-    print("\n" + "=" * 60)
-    print("6. パフォーマンスサマリー")
-    print("=" * 60)
+    if verbose:
+        print(f"   Train Acc: {train_results['accuracy']:.2%}")
+        print(f"   Val Acc:   {val_results['accuracy']:.2%}")
+        print(f"   Test Acc:  {test_results['accuracy']:.2%}")
 
-    print(f"{'Dataset':<12} {'Accuracy':<12} {'Precision':<12} {'Recall':<12} {'F1 Score':<12}")
-    print("-" * 60)
-    print(f"{'Train':<12} {train_results['accuracy']:>10.2%}  {train_results['precision']:>10.2%}  {train_results['recall']:>10.2%}  {train_results['f1_score']:>10.2%}")
-    print(f"{'Validation':<12} {val_results['accuracy']:>10.2%}  {val_results['precision']:>10.2%}  {val_results['recall']:>10.2%}  {val_results['f1_score']:>10.2%}")
-    print(f"{'Test':<12} {test_results['accuracy']:>10.2%}  {test_results['precision']:>10.2%}  {test_results['recall']:>10.2%}  {test_results['f1_score']:>10.2%}")
+    # 6. モデル保存
+    os.makedirs(output_dir, exist_ok=True)
+    save_model(trained_model, tokenizer, save_path=output_dir)
 
-    # 7. モデル保存
-    print("\n" + "=" * 60)
-    print("7. モデル保存")
-    print("=" * 60)
+    if verbose:
+        print(f"\n✅ モデル保存: {output_dir}")
 
-    save_model(trained_model, tokenizer, save_path='models/sentiment_model')
+    # 結果を返す
+    return {
+        'train_acc': train_results['accuracy'] * 100,  # パーセント表記
+        'val_acc': val_results['accuracy'] * 100,
+        'test_acc': test_results['accuracy'] * 100,
+        'train_f1': train_results['f1_score'] * 100,
+        'val_f1': val_results['f1_score'] * 100,
+        'test_f1': test_results['f1_score'] * 100,
+        'best_epoch': best_epoch,
+        'random_seed': random_seed,
+        'dataset_size': len(df)
+    }
 
-    # 8. 成功判定
-    print("\n" + "=" * 60)
-    print("8. 成功判定")
-    print("=" * 60)
 
-    target_accuracy = 0.85
+def main():
+    """テスト実行"""
+    import argparse
 
-    if test_results['accuracy'] >= target_accuracy:
-        print(f"✅ 目標達成！Test Accuracy {test_results['accuracy']:.2%} ≥ {target_accuracy:.0%}")
-        print(f"\n🎉 Issue #6 Phase 1 完了！")
-        return 0
-    else:
-        print(f"⚠️  目標未達: Test Accuracy {test_results['accuracy']:.2%} < {target_accuracy:.0%}")
-        print(f"\n💡 Phase 2（5000件dataset）の検討が必要です")
-        return 1
+    parser = argparse.ArgumentParser(description='単一トライアル学習')
+    parser.add_argument('--dataset', type=str, required=True, help='Dataset CSV path')
+    parser.add_argument('--output', type=str, required=True, help='Output directory')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate')
+    parser.add_argument('--patience', type=int, default=2, help='Early stopping patience')
+
+    args = parser.parse_args()
+
+    results = train_sentiment(
+        dataset_path=args.dataset,
+        output_dir=args.output,
+        random_seed=args.seed,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        learning_rate=args.lr,
+        patience=args.patience
+    )
+
+    print("\n" + "=" * 70)
+    print("学習完了")
+    print("=" * 70)
+    print(f"Train Acc: {results['train_acc']:.2f}%")
+    print(f"Val Acc:   {results['val_acc']:.2f}%")
+    print(f"Test Acc:  {results['test_acc']:.2f}%")
+    print(f"Best Epoch: {results['best_epoch']}")
 
 
 if __name__ == '__main__':
-    exit(main())
+    main()
