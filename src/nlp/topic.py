@@ -58,6 +58,54 @@ def filter_english_reviews(df: pd.DataFrame, text_column: str = 'review_text') -
     return df_english.drop(columns=['is_english'])
 
 
+def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text', game_name_column: str = 'game_name') -> pd.DataFrame:
+    """
+    各レビューから自ゲームのタイトル単語を除去
+
+    自己言及問題（GTA Onlineのレビューに"gta online"が含まれる等）を防ぐため、
+    各レビューのgame_name列の単語をレビューテキストから除去する。
+
+    除去フィルター:
+        - 2文字以下の単語（"v", "of", "a"等）
+        - 数字のみの単語（"2077", "3", "5"等）
+
+    Args:
+        df: レビューデータフレーム
+        text_column: テキストカラム名
+        game_name_column: ゲーム名カラム名
+
+    Returns:
+        ゲーム名除去済みのデータフレーム
+    """
+    df_copy = df.copy()
+
+    def _get_game_words(game_name: str) -> List[str]:
+        """ゲーム名から除去対象の単語リストを生成"""
+        words = re.findall(r'[a-zA-Z0-9]+', game_name.lower())
+        return [w for w in words if len(w) > 3 and not w.isnumeric()]
+
+    def _remove_words(text: str, words: List[str]) -> str:
+        """テキストから単語リストを除去"""
+        for word in words:
+            text = re.sub(rf'\b{re.escape(word)}\b', '', text, flags=re.IGNORECASE)
+        return text.strip()
+
+    for game_name, group_idx in df_copy.groupby(game_name_column).groups.items():
+        game_words = _get_game_words(game_name)
+        if not game_words:
+            continue
+        df_copy.loc[group_idx, text_column] = df_copy.loc[group_idx, text_column].apply(
+            lambda text: _remove_words(str(text), game_words)
+        )
+
+    print(f"ゲーム名除去完了")
+    for game_name in df_copy[game_name_column].unique():
+        words = _get_game_words(game_name)
+        print(f"  {game_name}: {words}")
+
+    return df_copy
+
+
 def create_topic_model(
     min_topic_size: int = 10,
     embedding_model_name: str = 'all-MiniLM-L6-v2',
@@ -90,11 +138,12 @@ def create_topic_model(
         print(f"ngram_range: {ngram_range}")
         print(f"min_df: {min_df}")
 
-    # CountVectorizer設定（ストップワード除去・n-gram）
+    # CountVectorizer設定（ストップワード除去・n-gram・3文字以上の単語のみ）
     vectorizer = CountVectorizer(
         stop_words='english',
         ngram_range=ngram_range,
-        min_df=min_df
+        min_df=min_df,
+        token_pattern=r'(?u)\b[a-zA-Z]{4,}\b'  # 4文字以上のアルファベットのみ対象
     )
 
     # 埋め込みモデル

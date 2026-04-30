@@ -24,6 +24,7 @@ transformers      # Hugging Face
 # - torch             # PyTorch（Dockerfileでインストール済み）
 bertopic          # トピック抽出
 sentence-transformers  # 文章埋め込み
+langdetect        # 言語検出（非英語レビュー除外）
 
 # Phase 7: Time Series (Prophet)
 # - prophet           # 時系列予測
