@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pandas as pd
 from src.nlp.topic import (
     filter_english_reviews,
+    remove_game_names,
     create_topic_model,
     extract_topics,
     print_topic_summary,
@@ -43,10 +44,14 @@ def main():
     print(f"   ✓ 英語レビュー: {english_count}件")
     print(f"   ✓ 除外（非英語）: {filtered_count}件 ({filtered_count/original_count*100:.1f}%)")
 
+    # 3. ゲーム名除去
+    print("\n[3/5] ゲーム名除去")
+    df_english = remove_game_names(df_english, text_column='review_text', game_name_column='game_name')
+
     texts = df_english['review_text'].tolist()
 
-    # 3. BERTopicモデル作成
-    print("\n[3/5] BERTopicモデル初期化")
+    # 4. BERTopicモデル作成
+    print("\n[4/6] BERTopicモデル初期化")
     # 10000件データなので min_topic_size を調整（10 → 20に増加）
     min_topic_size = 20
     topic_model = create_topic_model(
@@ -61,8 +66,8 @@ def main():
     print(f"   ✓ n-gram範囲: (1, 2)")
     print(f"   ✓ ストップワード除去: ON")
 
-    # 4. トピック抽出実行
-    print("\n[4/5] トピック抽出実行中...")
+    # 5. トピック抽出実行
+    print("\n[5/6] トピック抽出実行中...")
     print("   ⏳ 処理には数分かかる場合があります...")
 
     topic_model, topics, probabilities = extract_topics(
@@ -78,8 +83,8 @@ def main():
     print(f"   ✓ 抽出トピック数: {num_topics}")
     print(f"   ✓ Outlier: {outlier_count}件 ({outlier_count/len(topics)*100:.1f}%)")
 
-    # 5. 結果をサマリー表示
-    print("\n[5/5] 結果サマリー")
+    # 6. 結果をサマリー表示
+    print("\n[6/6] 結果サマリー")
     print_topic_summary(
         topic_model=topic_model,
         topics=topics,
