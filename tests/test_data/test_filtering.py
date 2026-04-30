@@ -1,7 +1,8 @@
 """
 フィルタリング機能のテストスクリプト
 
-フィルタリング前後を比較して、実際に非英語レビューが除外されているか確認する
+フィルタリング前後を比較して、実際に非英語レビューが除外されているか確認する。
+langdetectによるフィリピン語・スペイン語等のラテン文字言語の除外も検証する。
 """
 
 import sys
@@ -10,7 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import requests
 import time
-from src.data.steam_collector import get_steam_reviews, is_valid_english_review
+from langdetect import detect_langs, LangDetectException, DetectorFactory
+DetectorFactory.seed = 0  # 再現性のために固定
+from src.data.steam_collector import get_steam_reviews
 
 
 def get_raw_reviews_no_filter(app_id: int, num: int = 100):
@@ -18,7 +21,7 @@ def get_raw_reviews_no_filter(app_id: int, num: int = 100):
     base_url = "https://store.steampowered.com/appreviews/"
     params = {
         'json': 1,
-        'language': 'all',  # 全言語取得
+        'language': 'all',
         'filter': 'recent',
         'review_type': 'all',
         'purchase_type': 'all',
@@ -56,6 +59,37 @@ def get_raw_reviews_no_filter(app_id: int, num: int = 100):
     return reviews
 
 
+def get_rejection_reason(text: str, min_length: int = 20, lang_confidence: float = 0.8) -> list:
+    """除外理由を返す"""
+    reasons = []
+
+    if not all(ord(c) < 128 for c in text):
+        reasons.append("非ASCII")
+
+    if len(text) < min_length:
+        reasons.append(f"短文({len(text)}文字)")
+
+    alpha_chars = sum(1 for c in text if c.isalpha())
+    if len(text) > 0 and alpha_chars / len(text) < 0.5:
+        reasons.append(f"アルファベット{alpha_chars/len(text)*100:.0f}%")
+
+    # ASCIIかつmin_length以上かつアルファベット50%以上のものはlangdetectで判定
+    if (all(ord(c) < 128 for c in text) and
+            len(text) >= min_length and
+            len(text) > 0 and
+            sum(1 for c in text if c.isalpha()) / len(text) >= 0.5):
+        try:
+            langs = detect_langs(text)
+            en_score = next((l.prob for l in langs if l.lang == 'en'), 0.0)
+            if en_score < lang_confidence:
+                top_lang = langs[0].lang if langs else 'unknown'
+                reasons.append(f"langdetect:en={en_score:.2f}({top_lang})")
+        except LangDetectException:
+            reasons.append("langdetect:判定不可")
+
+    return reasons
+
+
 def main():
     """フィルタリング機能のテスト"""
 
@@ -63,56 +97,87 @@ def main():
     print("フィルタリング機能テスト（200件収集）")
     print("=" * 80)
 
-    # Baldur's Gate 3 から200件収集（フィルタリング前後を比較）
     app_id = 1086940
     num = 200
+    min_length = 20
+    lang_confidence = 0.8  # 英語信頼スコア閾値
 
     print(f"\nゲーム: Baldur's Gate 3 (app_id={app_id})")
     print(f"目標件数: {num}件")
+    print(f"最小文字数: {min_length}文字")
+    print(f"langdetect信頼スコア閾値: {lang_confidence}")
 
     # 1. フィルタリングなしで取得
-    print("\n[1/2] フィルタリングなしで取得中...")
+    print("\n[1/2] フィルタリングなしで取得中（全言語）...")
     raw_reviews = get_raw_reviews_no_filter(app_id, num)
-    print(f"✅ 取得完了: {len(raw_reviews)}件（全言語）")
+    print(f"✅ 取得完了: {len(raw_reviews)}件")
 
-    # フィルタリング前の統計
-    print("\n【フィルタリング前の統計】")
-    filtered_out = []
+    # 各フィルター段階での除外数を集計
+    print("\n【フィルタリング段階別の統計】")
+
+    non_ascii_out = 0
+    short_out = 0
+    low_alpha_out = 0
+    langdetect_out = 0
     valid_count = 0
+
+    langdetect_samples = []
 
     for review in raw_reviews:
         text = review['review_text']
-        if is_valid_english_review(text):
-            valid_count += 1
-        else:
-            filtered_out.append(review)
-
-    print(f"有効な英語レビュー: {valid_count}件 ({valid_count/len(raw_reviews)*100:.1f}%)")
-    print(f"除外される: {len(filtered_out)}件 ({len(filtered_out)/len(raw_reviews)*100:.1f}%)")
-
-    # 除外されるレビューのサンプル表示
-    print("\n【除外されるレビューのサンプル（先頭10件）】")
-    for i, review in enumerate(filtered_out[:10], 1):
-        text = review['review_text']
         lang = review['language']
-        reason = []
 
-        # ASCII判定
+        # 段階別チェック
         if not all(ord(c) < 128 for c in text):
-            reason.append("非ASCII")
+            non_ascii_out += 1
+            continue
 
-        # 長さ判定
-        if len(text) < 20:
-            reason.append(f"短文({len(text)}文字)")
+        if len(text) < min_length:
+            short_out += 1
+            continue
 
-        # アルファベット割合判定
         alpha_chars = sum(1 for c in text if c.isalpha())
-        if len(text) > 0 and alpha_chars / len(text) < 0.5:
-            reason.append(f"アルファベット{alpha_chars/len(text)*100:.0f}%")
+        if alpha_chars / len(text) < 0.5:
+            low_alpha_out += 1
+            continue
 
-        reason_str = ", ".join(reason)
-        preview = text[:80] if len(text) > 80 else text
-        print(f"{i}. [{lang}] [{reason_str}] {preview}")
+        # langdetectチェック（信頼スコア閾値）
+        try:
+            langs = detect_langs(text)
+            en_score = next((l.prob for l in langs if l.lang == 'en'), 0.0)
+            if en_score < lang_confidence:
+                langdetect_out += 1
+                if len(langdetect_samples) < 5:
+                    top_lang = langs[0].lang if langs else 'unknown'
+                    langdetect_samples.append({
+                        'text': text,
+                        'steam_lang': lang,
+                        'en_score': en_score,
+                        'detected': top_lang
+                    })
+                continue
+        except LangDetectException:
+            langdetect_out += 1
+            continue
+
+        valid_count += 1
+
+    total = len(raw_reviews)
+    print(f"非ASCII（中国語・ロシア語等）: {non_ascii_out}件 ({non_ascii_out/total*100:.1f}%)")
+    print(f"短文（{min_length}文字未満）          : {short_out}件 ({short_out/total*100:.1f}%)")
+    print(f"アルファベット50%未満       : {low_alpha_out}件 ({low_alpha_out/total*100:.1f}%)")
+    print(f"langdetect（非英語と判定）  : {langdetect_out}件 ({langdetect_out/total*100:.1f}%)")
+    print(f"有効な英語レビュー          : {valid_count}件 ({valid_count/total*100:.1f}%)")
+
+    # langdetectで除外されたサンプル
+    if langdetect_samples:
+        print(f"\n【langdetectで除外されたサンプル（信頼スコア{lang_confidence}未満）】")
+        for i, sample in enumerate(langdetect_samples, 1):
+            preview = sample['text'][:100] if len(sample['text']) > 100 else sample['text']
+            print(f"{i}. [Steam:{sample['steam_lang']}] [en={sample['en_score']:.2f}, 検出:{sample['detected']}] {preview}")
+    else:
+        print(f"\n【langdetectで除外されたサンプル】")
+        print("  なし（全てのラテン文字レビューが英語と判定されました）")
 
     # 2. フィルタリングありで取得
     print(f"\n[2/2] フィルタリングありで{num}件収集中...")
@@ -125,37 +190,21 @@ def main():
 
     print(f"\n✅ 収集完了: {len(filtered_reviews)}件")
 
-    # 検証: 全レビューがフィルタリング条件を満たしているか
+    # 検証
     print("\n【フィルタリング後の検証】")
-
-    non_ascii_count = 0
-    short_count = 0
-    low_alpha_count = 0
-
+    issues = []
     for review in filtered_reviews:
         text = review['review_text']
+        reasons = get_rejection_reason(text, min_length, lang_confidence)
+        if reasons:
+            issues.append((text, reasons))
 
-        # ASCII判定
-        if not all(ord(c) < 128 for c in text):
-            non_ascii_count += 1
-
-        # 長さ判定
-        if len(text) < 20:
-            short_count += 1
-
-        # アルファベット割合判定
-        alpha_chars = sum(1 for c in text if c.isalpha())
-        if alpha_chars / len(text) < 0.5:
-            low_alpha_count += 1
-
-    print(f"非ASCII文字を含む: {non_ascii_count}件 (期待値: 0)")
-    print(f"20文字未満: {short_count}件 (期待値: 0)")
-    print(f"アルファベット50%未満: {low_alpha_count}件 (期待値: 0)")
-
-    if non_ascii_count == 0 and short_count == 0 and low_alpha_count == 0:
-        print("\n✅ フィルタリング成功: 全レビューが条件を満たしています")
+    if not issues:
+        print("✅ フィルタリング成功: 全レビューが条件を満たしています")
     else:
-        print("\n⚠️ フィルタリング失敗: 一部レビューが条件を満たしていません")
+        print(f"⚠️ フィルタリング失敗: {len(issues)}件が条件を満たしていません")
+        for text, reasons in issues[:5]:
+            print(f"  - [{', '.join(reasons)}] {text[:80]}")
 
     # サンプル表示
     print("\n【有効な英語レビューのサンプル（先頭5件）】")
