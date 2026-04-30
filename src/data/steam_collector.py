@@ -6,7 +6,43 @@ Steam APIからゲームレビューを収集する機能を提供します。
 
 import requests
 import time
+import re
 from typing import List, Dict, Optional
+
+
+def is_valid_english_review(text: str, min_length: int = 20) -> bool:
+    """
+    レビューが有効な英語かどうかを判定
+
+    Args:
+        text: レビューテキスト
+        min_length: 最小文字数（デフォルト: 20）
+
+    Returns:
+        有効な英語レビューならTrue
+
+    判定条件:
+        1. ASCII文字のみで構成されている
+        2. 最小文字数以上
+        3. アルファベットが50%以上含まれる（記号のみを除外）
+    """
+    if not text or not isinstance(text, str):
+        return False
+
+    # 1. ASCII文字のみ（中国語、ロシア語、アラビア語等を除外）
+    if not re.match(r'^[\x00-\x7F]+$', text):
+        return False
+
+    # 2. 最小文字数チェック（超短文・スパムを除外）
+    if len(text) < min_length:
+        return False
+
+    # 3. アルファベット割合チェック（記号のみ、数字のみを除外）
+    alpha_chars = len(re.findall(r'[a-zA-Z]', text))
+    if alpha_chars / len(text) < 0.5:
+        return False
+
+    return True
 
 
 def get_steam_reviews(
@@ -103,8 +139,14 @@ def get_steam_reviews(
             if len(reviews) >= num:
                 break
 
+            review_text = review.get('review', '')
+
+            # 有効な英語レビューのみ収集
+            if not is_valid_english_review(review_text):
+                continue
+
             reviews.append({
-                'review_text': review.get('review', ''),
+                'review_text': review_text,
                 'voted_up': review.get('voted_up', False),
                 'votes_up': review.get('votes_up', 0),
                 'language': review.get('language', ''),
