@@ -169,13 +169,35 @@ def print_summary(df: pd.DataFrame):
 
 def main():
     """メイン実行"""
-    # Phase A: 既存データ（1000, 5000）
-    # Phase B: 新規データ（10000, 20000）- データ収集後に実行
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Learning Curve実験')
+    parser.add_argument(
+        '--sizes',
+        type=int,
+        nargs='+',
+        default=[1000, 5000, 10000, 20000],
+        help='テストするデータ量（例: --sizes 10000 20000）'
+    )
+    parser.add_argument(
+        '--seeds',
+        type=int,
+        nargs='+',
+        default=[42, 123, 456],
+        help='ランダムシード（例: --seeds 42 123 456）'
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='data/experiments/learning_curve',
+        help='結果保存ディレクトリ'
+    )
+    args = parser.parse_args()
 
     results = run_learning_curve_experiment(
-        data_sizes=[1000, 5000, 10000, 20000],
-        seeds=[42, 123, 456],
-        output_dir='data/experiments/learning_curve'
+        data_sizes=args.sizes,
+        seeds=args.seeds,
+        output_dir=args.output_dir
     )
 
     return results
