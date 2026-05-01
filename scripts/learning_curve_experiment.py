@@ -10,12 +10,11 @@ import sys
 import pandas as pd
 import json
 from datetime import datetime
-from pathlib import Path
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from scripts.train_single_trial import train_single_trial
+from scripts.train_sentiment import train_sentiment
 
 
 def run_learning_curve_experiment(
@@ -68,13 +67,14 @@ def run_learning_curve_experiment(
                 os.makedirs(model_dir, exist_ok=True)
 
                 # 学習実行
-                metrics = train_single_trial(
+                metrics = train_sentiment(
                     dataset_path=dataset_path,
                     output_dir=model_dir,
                     random_seed=seed,
                     batch_size=16,
                     epochs=10,
-                    learning_rate=2e-5,
+                    learning_rate=1e-5,
+                    patience=3,
                     verbose=True
                 )
 
@@ -169,13 +169,35 @@ def print_summary(df: pd.DataFrame):
 
 def main():
     """メイン実行"""
-    # Phase A: 既存データ（1000, 5000）
-    # Phase B: 新規データ（10000, 20000）- データ収集後に実行
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Learning Curve実験')
+    parser.add_argument(
+        '--sizes',
+        type=int,
+        nargs='+',
+        default=[1000, 5000, 10000, 20000],
+        help='テストするデータ量（例: --sizes 10000 20000）'
+    )
+    parser.add_argument(
+        '--seeds',
+        type=int,
+        nargs='+',
+        default=[42, 123, 456],
+        help='ランダムシード（例: --seeds 42 123 456）'
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='data/experiments/learning_curve',
+        help='結果保存ディレクトリ'
+    )
+    args = parser.parse_args()
 
     results = run_learning_curve_experiment(
-        data_sizes=[1000, 5000, 10000, 20000],
-        seeds=[42, 123, 456],
-        output_dir='data/experiments/learning_curve'
+        data_sizes=args.sizes,
+        seeds=args.seeds,
+        output_dir=args.output_dir
     )
 
     return results

@@ -1,5 +1,6 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
-        build up down restart logs shell exec gpu-check python-version
+        build up down restart logs shell exec gpu-check python-version \
+        extract-topics test-topic
 
 help:
 	@echo "Available commands:"
@@ -22,6 +23,7 @@ help:
 	@echo "  make notebook      - Jupyter起動"
 	@echo "  make test          - テスト実行"
 	@echo "  make test-nlp      - NLPテスト"
+	@echo "  make test-topic    - トピック抽出テスト"
 	@echo "  make test-ts       - 時系列テスト"
 	@echo "  make lint          - Linter実行"
 	@echo "  make format        - コードフォーマット"
@@ -29,6 +31,7 @@ help:
 	@echo ""
 	@echo "【機械学習】"
 	@echo "  make collect-data       - データ収集（Steam API）"
+	@echo "  make extract-topics     - トピック抽出（10000件レビュー）"
 	@echo "  make train-sentiment    - 感情分析モデル学習（10000件・⚠️best_model上書き）"
 	@echo "  make train-test         - テスト用学習（1000件・test_modelに保存）"
 	@echo "  make train-custom       - カスタム設定で学習"
@@ -76,13 +79,16 @@ setup:
 	pip install -r requirements.txt
 
 test:
-	pytest tests/ -v
+	docker-compose exec dev pytest tests/ -v
 
 test-nlp:
-	pytest tests/test_nlp/ -v
+	docker-compose exec dev pytest tests/test_nlp/ -v
+
+test-topic:
+	docker-compose exec dev pytest tests/test_nlp/test_topic.py -v
 
 test-ts:
-	pytest tests/test_timeseries/ -v
+	docker-compose exec dev pytest tests/test_timeseries/ -v
 
 lint:
 	flake8 src/ --max-line-length=100
@@ -104,10 +110,14 @@ clean:
 collect-data:
 	docker-compose exec dev python src/data/steam_collector.py
 
+# トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
+extract-topics:
+	docker-compose exec dev python scripts/extract_topics.py
+
 # 感情分析モデル学習（推奨設定：10000件、seed=42、lr=1e-5）
 # ⚠️ 警告: models/best_model/ を上書きします
 train-sentiment:
-	docker-compose exec dev python scripts/train_single_trial.py \
+	docker-compose exec dev python scripts/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/best_model \
 		--seed 42 \
@@ -118,19 +128,19 @@ train-sentiment:
 
 # テスト用学習（best_modelを上書きしない）
 train-test:
-	docker-compose exec dev python scripts/train_single_trial.py \
-		--dataset data/train/reviews_1000.csv \
+	docker-compose exec dev python scripts/train_sentiment.py \
+		--dataset data/train/reviews_10000.csv \
 		--output models/test_model \
 		--seed 42 \
 		--batch-size 16 \
 		--epochs 3 \
 		--lr 1e-5 \
-		--patience 2
+		--patience 3
 
 # カスタム設定で学習（変数で設定を上書き可能）
-# 例: make train-custom DATASET=data/train/reviews_5000.csv LR=2e-5
+# 例: make train-custom DATASET=data/train/reviews_5000.csv LR=1e-5
 train-custom:
-	docker-compose exec dev python scripts/train_single_trial.py \
+	docker-compose exec dev python scripts/train_sentiment.py \
 		--dataset $(DATASET) \
 		--output $(OUTPUT) \
 		--seed $(SEED) \

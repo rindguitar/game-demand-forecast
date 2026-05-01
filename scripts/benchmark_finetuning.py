@@ -106,7 +106,7 @@ def benchmark_batch_size(batch_sizes=[8, 16, 32, 64], dataset_size=100):
 
             # Modelを作成
             model = SentimentClassifier().to(device)
-            optimizer = AdamW(model.parameters(), lr=2e-5)
+            optimizer = AdamW(model.parameters(), lr=1e-5)
 
             # Dataset & DataLoader
             dataset = DummyDataset(size=dataset_size)
@@ -210,7 +210,7 @@ def benchmark_training_time(batch_size=32, dataset_size=100, num_batches=10):
 
     # Model作成
     model = SentimentClassifier().to(device)
-    optimizer = AdamW(model.parameters(), lr=2e-5)
+    optimizer = AdamW(model.parameters(), lr=1e-5)
 
     # Dataset & DataLoader
     dataset = DummyDataset(size=dataset_size)
