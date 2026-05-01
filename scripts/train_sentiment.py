@@ -7,6 +7,8 @@ learning_curve_experiment.pyからもimport可能。
 
 import sys
 import os
+import json
+from datetime import datetime
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -175,8 +177,8 @@ def train_sentiment(
         print(f"\n✅ モデル保存: {output_dir}")
 
     # 結果を返す
-    return {
-        'train_acc': train_results['accuracy'] * 100,  # パーセント表記
+    metrics = {
+        'train_acc': train_results['accuracy'] * 100,
         'val_acc': val_results['accuracy'] * 100,
         'test_acc': test_results['accuracy'] * 100,
         'train_f1': train_results['f1_score'] * 100,
@@ -186,6 +188,28 @@ def train_sentiment(
         'random_seed': random_seed,
         'dataset_size': len(df)
     }
+
+    # 学習結果をJSONに保存
+    result_data = {
+        'timestamp': datetime.now().isoformat(),
+        'dataset_path': dataset_path,
+        'hyperparameters': {
+            'learning_rate': learning_rate,
+            'batch_size': batch_size,
+            'epochs': epochs,
+            'patience': patience,
+            'random_seed': random_seed,
+        },
+        'metrics': metrics
+    }
+    result_path = os.path.join(output_dir, 'training_results.json')
+    with open(result_path, 'w', encoding='utf-8') as f:
+        json.dump(result_data, f, indent=2, ensure_ascii=False)
+
+    if verbose:
+        print(f"✅ 学習結果保存: {result_path}")
+
+    return metrics
 
 
 def main():
