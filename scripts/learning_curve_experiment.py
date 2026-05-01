@@ -10,7 +10,6 @@ import sys
 import pandas as pd
 import json
 from datetime import datetime
-from pathlib import Path
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -74,7 +73,8 @@ def run_learning_curve_experiment(
                     random_seed=seed,
                     batch_size=16,
                     epochs=10,
-                    learning_rate=2e-5,
+                    learning_rate=1e-5,
+                    patience=3,
                     verbose=True
                 )
 

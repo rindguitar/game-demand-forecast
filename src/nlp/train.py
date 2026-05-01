@@ -105,9 +105,9 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     epochs: int = 5,
-    lr: float = 2e-5,
+    lr: float = 1e-5,
     device: str = 'cuda',
-    patience: int = 2,
+    patience: int = 3,
     model_save_path: str = 'models/sentiment_model/best_model.pth',
     test_loader: DataLoader = None
 ) -> Tuple[nn.Module, int]:
@@ -119,9 +119,9 @@ def train_model(
         train_loader: Train DataLoader
         val_loader: Validation DataLoader
         epochs: 最大エポック数（デフォルト5）
-        lr: learning rate（デフォルト2e-5）
+        lr: learning rate（デフォルト1e-5）
         device: 'cuda'または'cpu'
-        patience: Early Stopping patience（デフォルト2）
+        patience: Early Stopping patience（デフォルト3）
         model_save_path: ベストmodelの保存パス
         test_loader: Test DataLoader（省略可。指定時は各エポックでTest精度も記録）
 
@@ -133,7 +133,7 @@ def train_model(
         >>> model.to('cuda')
         >>> trained_model, best_epoch = train_model(
         ...     model, train_loader, val_loader,
-        ...     epochs=5, lr=2e-5, device='cuda', patience=2,
+        ...     epochs=5, lr=1e-5, device='cuda', patience=3,
         ...     test_loader=test_loader  # Test精度も記録
         ... )
     """

@@ -125,10 +125,10 @@ train-test:
 		--batch-size 16 \
 		--epochs 3 \
 		--lr 1e-5 \
-		--patience 2
+		--patience 3
 
 # カスタム設定で学習（変数で設定を上書き可能）
-# 例: make train-custom DATASET=data/train/reviews_5000.csv LR=2e-5
+# 例: make train-custom DATASET=data/train/reviews_5000.csv LR=1e-5
 train-custom:
 	docker-compose exec dev python scripts/train_sentiment.py \
 		--dataset $(DATASET) \

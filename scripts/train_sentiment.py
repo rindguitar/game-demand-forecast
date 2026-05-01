@@ -28,8 +28,8 @@ def train_sentiment(
     random_seed: int = 42,
     batch_size: int = 16,
     epochs: int = 10,
-    learning_rate: float = 2e-5,
-    patience: int = 2,
+    learning_rate: float = 1e-5,
+    patience: int = 3,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     verbose: bool = True
@@ -198,8 +198,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate')
-    parser.add_argument('--patience', type=int, default=2, help='Early stopping patience')
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
+    parser.add_argument('--patience', type=int, default=3, help='Early stopping patience')
 
     args = parser.parse_args()
 
