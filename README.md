@@ -86,7 +86,7 @@ make help
 ### 感情分析モデルの学習
 
 ```bash
-# テスト用学習（1000件・短時間・best_modelを上書きしない）
+# テスト用学習（パイプライン確認用・best_modelを上書きしない）
 make train-test
 
 # 推奨設定で学習（10000件・⚠️ best_modelを上書き）
@@ -99,33 +99,37 @@ make train-custom DATASET=data/train/reviews_5000.csv OUTPUT=models/my_model SEE
 ### テスト実行
 
 ```bash
-# 全テスト実行
-make test
-
-# NLPテストのみ
-make test-nlp
+make test           # 全テスト実行
+make test-nlp       # NLPテストのみ
+make test-topic     # トピック抽出テストのみ
 ```
 
 ## プロジェクト構成
+
 ```
 game-demand-forecast/
-├── notebooks/          # Jupyter Notebook（実験・分析用）
-├── src/               # ソースコード
-│   ├── data/         # データ収集
-│   ├── nlp/          # 自然言語処理
-│   │   ├── sentiment.py  - 感情分析
-│   │   ├── model.py      - DistilBERTモデル
-│   │   └── train.py      - 学習ループ
-│   ├── timeseries/   # 時系列予測
-│   ├── integration/  # NLP + 時系列統合
-│   ├── utils/        # ユーティリティ
+├── src/               # コアモジュール → src/README.md
+│   ├── data/         # データ収集・前処理
+│   ├── nlp/          # 感情分析・トピック抽出
+│   ├── timeseries/   # 時系列予測（実装予定）
+│   ├── integration/  # NLP + 時系列統合（実装予定）
 │   └── visualization/ # 可視化
+├── scripts/           # 実行スクリプト → scripts/README.md
+│   ├── collect/      # データ収集
+│   ├── nlp/          # NLP本番実行
+│   └── experiments/  # 実験・検証・ベンチマーク
+├── tests/             # テストコード → tests/README.md
+│   ├── test_data/    # データ収集・前処理テスト
+│   └── test_nlp/     # NLPテスト
 ├── data/              # データ保存（.gitignoreで除外）
 ├── models/            # 学習済みモデル（.gitignoreで除外）
-├── scripts/           # 自動化スクリプト
-│   └── train_single_trial.py  - 学習スクリプト
-└── tests/             # テストコード
+└── notebooks/         # Jupyter Notebook（実験・分析用）
 ```
+
+各ディレクトリの詳細は以下を参照してください：
+- [src/README.md](src/README.md) — コアモジュールの用途・主要関数
+- [scripts/README.md](scripts/README.md) — 実行スクリプトの用途・使用方法
+- [tests/README.md](tests/README.md) — テストの構成・実行方法
 
 ## ドキュメント
 
