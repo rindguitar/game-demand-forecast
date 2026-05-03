@@ -12,7 +12,7 @@ import os
 import pandas as pd
 
 # srcをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.data.steam_collector import collect_balanced_reviews
 from src.data.preprocessing import prepare_validation_dataset

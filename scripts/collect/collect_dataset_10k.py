@@ -12,7 +12,7 @@ import sys
 import pandas as pd
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.data.steam_collector import collect_balanced_reviews
 

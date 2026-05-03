@@ -112,12 +112,12 @@ collect-data:
 
 # トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
 extract-topics:
-	docker-compose exec dev python scripts/extract_topics.py
+	docker-compose exec dev python scripts/nlp/extract_topics.py
 
 # 感情分析モデル学習（推奨設定：10000件、seed=42、lr=1e-5）
 # ⚠️ 警告: models/best_model/ を上書きします
 train-sentiment:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/best_model \
 		--seed 42 \
@@ -128,7 +128,7 @@ train-sentiment:
 
 # テスト用学習（best_modelを上書きしない）
 train-test:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/test_model \
 		--seed 42 \
@@ -140,7 +140,7 @@ train-test:
 # カスタム設定で学習（変数で設定を上書き可能）
 # 例: make train-custom DATASET=data/train/reviews_5000.csv LR=1e-5
 train-custom:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset $(DATASET) \
 		--output $(OUTPUT) \
 		--seed $(SEED) \

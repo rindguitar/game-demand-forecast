@@ -12,9 +12,9 @@ import json
 from datetime import datetime
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from scripts.train_sentiment import train_sentiment
+from scripts.nlp.train_sentiment import train_sentiment
 
 
 def run_learning_curve_experiment(
