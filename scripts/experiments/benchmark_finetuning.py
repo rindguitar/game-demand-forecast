@@ -18,7 +18,7 @@ from torch.optim import AdamW
 import numpy as np
 
 # srcをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 
 class DummyDataset(Dataset):

@@ -1,6 +1,7 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
-        extract-topics test-topic
+        extract-topics test-topic \
+        collect-10k collect-20k learning-curve analyze-curve
 
 help:
 	@echo "Available commands:"
@@ -31,7 +32,11 @@ help:
 	@echo ""
 	@echo "【機械学習】"
 	@echo "  make collect-data       - データ収集（Steam API）"
+	@echo "  make collect-10k        - 10000件レビュー収集"
+	@echo "  make collect-20k        - 20000件レビュー収集"
 	@echo "  make extract-topics     - トピック抽出（10000件レビュー）"
+	@echo "  make learning-curve     - Learning Curve実験（10k vs 20k）"
+	@echo "  make analyze-curve      - Learning Curve結果分析・可視化"
 	@echo "  make train-sentiment    - 感情分析モデル学習（10000件・⚠️best_model上書き）"
 	@echo "  make train-test         - テスト用学習（1000件・test_modelに保存）"
 	@echo "  make train-custom       - カスタム設定で学習"
@@ -110,14 +115,29 @@ clean:
 collect-data:
 	docker-compose exec dev python src/data/steam_collector.py
 
+collect-10k:
+	docker-compose exec dev python scripts/collect/collect_dataset_10k.py
+
+collect-20k:
+	docker-compose exec dev python scripts/collect/collect_dataset_20k.py
+
+# Learning Curve実験（SIZES で比較サイズを指定可能。例: make learning-curve SIZES="10000 20000"）
+SIZES ?= 10000 20000
+learning-curve:
+	docker-compose exec dev python scripts/experiments/learning_curve_experiment.py --sizes $(SIZES)
+
+# Learning Curve結果分析・可視化
+analyze-curve:
+	docker-compose exec dev python scripts/experiments/analyze_learning_curve.py
+
 # トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
 extract-topics:
-	docker-compose exec dev python scripts/extract_topics.py
+	docker-compose exec dev python scripts/nlp/extract_topics.py
 
 # 感情分析モデル学習（推奨設定：10000件、seed=42、lr=1e-5）
 # ⚠️ 警告: models/best_model/ を上書きします
 train-sentiment:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/best_model \
 		--seed 42 \
@@ -128,7 +148,7 @@ train-sentiment:
 
 # テスト用学習（best_modelを上書きしない）
 train-test:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/test_model \
 		--seed 42 \
@@ -140,7 +160,7 @@ train-test:
 # カスタム設定で学習（変数で設定を上書き可能）
 # 例: make train-custom DATASET=data/train/reviews_5000.csv LR=1e-5
 train-custom:
-	docker-compose exec dev python scripts/train_sentiment.py \
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset $(DATASET) \
 		--output $(OUTPUT) \
 		--seed $(SEED) \

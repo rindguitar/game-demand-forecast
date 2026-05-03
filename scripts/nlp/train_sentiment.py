@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import torch
 import pandas as pd
