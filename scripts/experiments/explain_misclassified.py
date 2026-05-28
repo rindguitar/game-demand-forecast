@@ -140,39 +140,113 @@ def aggregate_top_words(
     return result.sort_values('confidence', ascending=False).reset_index(drop=True)
 
 
-def build_summary(token_scores_df: pd.DataFrame, misclassified_df: pd.DataFrame) -> dict:
-    """モデル全体の傾向サマリーを作成"""
+# 英語ストップワード（頻出だが意味希薄なため集計から除外）
+STOPWORDS = {
+    'i', 'a', 'an', 'the', 'and', 'or', 'but', 'if', 'so', 'to', 'of', 'in', 'on',
+    'at', 'for', 'with', 'as', 'by', 'is', 'are', 'was', 'were', 'be', 'been',
+    'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
+    'could', 'can', 'may', 'might', 'must', 'this', 'that', 'these', 'those',
+    'my', 'your', 'his', 'her', 'its', 'our', 'their', 'me', 'you', 'him', 'us',
+    'them', 'we', 'he', 'she', 'it', 'they', 'what', 'which', 'who', 'when',
+    'where', 'why', 'how', 'all', 'each', 'every', 'some', 'any', 'no', 'not',
+    'only', 'own', 'same', 'than', 'then', 'too', 'very', 'just', 'one', 'two',
+    'there', 'here', 'where',
+}
+
+# 短縮形の断片（don't, you've, it's等がtokenizerで分割された残り）
+CONTRACTION_FRAGMENTS = {
+    # アポストロフィの後ろ部分
+    's', 't', 'd', 'm', 'll', 've', 're',
+    # アポストロフィの前部分（"...n't"系）
+    'don', 'won', 'isn', 'wasn', 'aren', 'weren',
+    'doesn', 'didn', 'couldn', 'wouldn', 'shouldn',
+    'hasn', 'haven', 'hadn', 'mustn', 'mightn', 'needn',
+    'ain', 'shan',
+}
+
+# 集計対象とする最小トークン長（短い断片を除外）
+MIN_TOKEN_LENGTH = 3
+
+
+def _is_meaningful_token(token: str) -> bool:
+    """集計対象として意味のあるトークンか判定"""
+    if not isinstance(token, str):
+        return False
+    # 特殊トークン除外
+    if token.startswith('['):
+        return False
+    # サブワード断片除外（##で始まる）
+    if token.startswith('##'):
+        return False
+    # 記号のみ除外
+    if not any(c.isalpha() for c in token):
+        return False
+    # 最小長フィルタ（s, t, ve, ll, re, m, d等の断片除外）
+    if len(token) < MIN_TOKEN_LENGTH:
+        return False
+    # ストップワード除外
+    if token.lower() in STOPWORDS:
+        return False
+    # 短縮形断片除外
+    if token.lower() in CONTRACTION_FRAGMENTS:
+        return False
+    return True
+
+
+def build_summary(
+    token_scores_df: pd.DataFrame,
+    misclassified_df: pd.DataFrame,
+    min_occurrences: int = 5,
+    top_n: int = 20,
+) -> dict:
+    """モデル全体の傾向サマリーを作成
+
+    Args:
+        min_occurrences: 集計に含める最小出現回数（ノイズ除去）
+        top_n: 各カテゴリで上位何件を返すか
+    """
     # error_type を結合
     df = token_scores_df.merge(
         misclassified_df[['review_id', 'error_type']],
         on='review_id', how='left'
     )
 
-    # 特殊トークン除外（[CLS], [SEP], [PAD]等）
-    df = df[~df['token'].str.startswith('[')]
+    # 意味のあるトークンのみに絞る（特殊トークン・記号・サブワード・ストップワード除外）
+    df = df[df['token'].apply(_is_meaningful_token)]
 
     summary = {
         'total_reviews_analyzed': int(token_scores_df['review_id'].nunique()),
-        'total_tokens': int(len(token_scores_df)),
+        'total_tokens_after_filter': int(len(df)),
+        'filter_criteria': {
+            'min_occurrences': min_occurrences,
+            'stopwords_excluded': True,
+            'subwords_excluded': True,
+            'special_tokens_excluded': True,
+        }
     }
 
-    # FP（NをPと誤認）でポジ方向に寄与した単語TOP20
-    fp_pos = df[(df['error_type'] == 'FP') & (df['score'] > 0)]
-    fp_top = (fp_pos.groupby('token')['score'].agg(['sum', 'count'])
-              .sort_values('sum', ascending=False).head(20))
-    summary['fp_top_positive_contributors'] = [
-        {'token': str(idx), 'total_score': round(r['sum'], 4), 'occurrences': int(r['count'])}
-        for idx, r in fp_top.iterrows()
-    ]
+    def _aggregate(sub_df: pd.DataFrame, ascending: bool) -> list:
+        """token単位で集計し、mean_score基準で並べる（最小出現回数フィルタ付き）"""
+        agg = sub_df.groupby('token')['score'].agg(['sum', 'mean', 'count'])
+        agg = agg[agg['count'] >= min_occurrences]
+        agg = agg.sort_values('mean', ascending=ascending).head(top_n)
+        return [
+            {
+                'token': str(idx),
+                'mean_score': round(r['mean'], 4),
+                'total_score': round(r['sum'], 4),
+                'occurrences': int(r['count']),
+            }
+            for idx, r in agg.iterrows()
+        ]
 
-    # FN（PをNと誤認）でネガ方向に寄与した単語TOP20
+    # FP（NをPと誤認）でポジ方向に寄与した単語
+    fp_pos = df[(df['error_type'] == 'FP') & (df['score'] > 0)]
+    summary['fp_top_positive_contributors'] = _aggregate(fp_pos, ascending=False)
+
+    # FN（PをNと誤認）でネガ方向に寄与した単語
     fn_neg = df[(df['error_type'] == 'FN') & (df['score'] < 0)]
-    fn_top = (fn_neg.groupby('token')['score'].agg(['sum', 'count'])
-              .sort_values('sum', ascending=True).head(20))
-    summary['fn_top_negative_contributors'] = [
-        {'token': str(idx), 'total_score': round(r['sum'], 4), 'occurrences': int(r['count'])}
-        for idx, r in fn_top.iterrows()
-    ]
+    summary['fn_top_negative_contributors'] = _aggregate(fn_neg, ascending=True)
 
     return summary
 
@@ -323,15 +397,19 @@ def main():
     # コンソール表示
     print(f'\n【サマリー】')
     print(f'  分析件数: {summary["total_reviews_analyzed"]}件')
-    print(f'  総トークン数: {summary["total_tokens"]}件')
+    print(f'  フィルタ後トークン数: {summary["total_tokens_after_filter"]}件')
+    print(f'  フィルタ条件: 最小出現{summary["filter_criteria"]["min_occurrences"]}回, '
+          f'ストップワード/サブワード/特殊トークン除外')
 
-    print(f'\n【FP（NをPと誤認）でポジ方向に寄与した単語 TOP10】')
+    print(f'\n【FP（NをPと誤認）でポジ方向に寄与した単語 TOP10（mean_score順）】')
     for item in summary['fp_top_positive_contributors'][:10]:
-        print(f"  {item['token']:20} | sum={item['total_score']:>7.3f} | 出現={item['occurrences']}回")
+        print(f"  {item['token']:15} | mean={item['mean_score']:>6.3f} | "
+              f"sum={item['total_score']:>7.3f} | 出現={item['occurrences']}回")
 
-    print(f'\n【FN（PをNと誤認）でネガ方向に寄与した単語 TOP10】')
+    print(f'\n【FN（PをNと誤認）でネガ方向に寄与した単語 TOP10（mean_score順）】')
     for item in summary['fn_top_negative_contributors'][:10]:
-        print(f"  {item['token']:20} | sum={item['total_score']:>7.3f} | 出現={item['occurrences']}回")
+        print(f"  {item['token']:15} | mean={item['mean_score']:>6.3f} | "
+              f"sum={item['total_score']:>7.3f} | 出現={item['occurrences']}回")
 
     print('\n' + '=' * 70)
     print('解釈性分析完了')
