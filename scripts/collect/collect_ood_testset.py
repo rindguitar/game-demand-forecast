@@ -10,6 +10,11 @@ OODテストセット収集スクリプト
 - ランダムに選び、有効な英語レビューが P50/N50 取れるゲームのみ採用
 - 目標: 20ゲーム × (Positive 50 + Negative 50) = 2000件（balanced）
 
+ジャンル偏り対策（特定ジャンルがテストセットを占有しないように）:
+- ノイズタグ（Indie / Free To Play）は判定から除外（遊びの種類を表さないため）
+- (a) 除去後のジャンル集合が採用済みと完全一致なら弾く（同一プロファイルの重複防止）
+- (b) 1ジャンルあたりの所属数に上限（--max-per-genre）を設ける（メインジャンルの偏り防止）
+
 再利用可能な汎用ツールとして設計（他プロジェクトでも流用可）。
 """
 
@@ -22,10 +27,9 @@ import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-import requests
 import pandas as pd
 
-from src.data.steam_collector import collect_balanced_reviews
+from src.data.steam_collector import collect_balanced_reviews, request_with_backoff
 
 
 # 学習に使った7ゲーム（テストでは除外）
@@ -37,6 +41,17 @@ TRAIN_GAME_IDS = {
     271590,   # Grand Theft Auto V
     730,      # Counter-Strike 2
     570,      # Dota 2
+}
+
+# ジャンル判定から除外するノイズタグ
+# 遊びの種類ではなく、開発規模(Indie)・価格モデル(Free To Play)・販売ステータス(Early Access)を表すため
+NOISE_TAGS = {'Indie', 'Free To Play', 'Early Access'}
+
+# Steam APIアクセス時のブラウザUA（データセンターIPからのブロック回避）
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/120.0 Safari/537.36'
 }
 
 
@@ -54,11 +69,6 @@ def get_popular_games(n_pages: int = 20) -> list:
         (app_id, game_name)のリスト（レビュー数の多い順）
     """
     base_url = "https://store.steampowered.com/search/results/"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/120.0 Safari/537.36'
-    }
 
     games = []
     seen = set()
@@ -72,8 +82,7 @@ def get_popular_games(n_pages: int = 20) -> list:
             'category1': 998,           # 998 = ゲームのみ（DLC・ツール等を除外）
             'json': 1,
         }
-        response = requests.get(base_url, params=params, headers=headers, timeout=30)
-        response.raise_for_status()
+        response = request_with_backoff(base_url, params=params, headers=HEADERS, timeout=30)
         data = response.json()
 
         items = data.get('items', [])
@@ -97,11 +106,40 @@ def get_popular_games(n_pages: int = 20) -> list:
     return games
 
 
+def get_game_genres(app_id: int) -> frozenset:
+    """
+    Steam公式のappdetails APIからゲームのジャンル集合を取得
+
+    Steamのジャンルは粗く順番も重要度順ではないため、「メインジャンル1つ」を
+    決めるのではなく集合（frozenset）として扱う。ノイズタグ（Indie等）は呼び出し側で除去する。
+
+    Args:
+        app_id: SteamのアプリID
+
+    Returns:
+        ジャンル名のfrozenset（取得失敗・ジャンル無しの場合は空のfrozenset）
+    """
+    url = "https://store.steampowered.com/api/appdetails"
+    params = {'appids': app_id, 'filters': 'genres'}
+    response = request_with_backoff(url, params=params, headers=HEADERS, timeout=30)
+    data = response.json()
+
+    entry = data.get(str(app_id), {})
+    if not entry.get('success'):
+        return frozenset()
+    genres = entry.get('data', {}).get('genres', [])
+    return frozenset(g['description'] for g in genres)
+
+
 def main():
     parser = argparse.ArgumentParser(description='OODテストセット収集')
     parser.add_argument('--n-games', type=int, default=20, help='採用するゲーム数')
     parser.add_argument('--n-positive', type=int, default=50, help='1ゲームあたりPositive件数')
     parser.add_argument('--n-negative', type=int, default=50, help='1ゲームあたりNegative件数')
+    parser.add_argument('--max-per-genre', type=int, default=4,
+                        help='1ジャンルあたりの最大採用数（ジャンル偏り防止）')
+    parser.add_argument('--max-per-profile', type=int, default=2,
+                        help='同じジャンル集合（プロファイル）あたりの最大採用数')
     parser.add_argument('--seed', type=int, default=42, help='ランダムシード')
     parser.add_argument('--output', type=str, default='data/test/reviews_ood_2000.csv',
                         help='出力先CSVパス')
@@ -127,15 +165,45 @@ def main():
     random.shuffle(candidates)
 
     # 2. 各ゲームから条件付き収集
-    print(f"\n[2/3] 条件付き収集（P/N両方が目標数取れたゲームのみ採用）...")
-    collected_games = []
+    print(f"\n[2/3] 条件付き収集（ジャンル偏り対策＋P/N両方が目標数取れたゲームのみ採用）...")
+    print(f"   ジャンル上限: 1ジャンルあたり最大{args.max_per_genre}本 / "
+          f"同一プロファイル最大{args.max_per_profile}本")
+    collected_games = []      # (app_id, name, sorted_genres) のリスト
     all_reviews = []
+    genre_counts = {}         # ジャンル名 -> 採用済み本数
+    profile_counts = {}       # ジャンル集合(frozenset) -> 採用済み本数（完全一致dedup用）
 
     for app_id, game_name in candidates:
         if len(collected_games) >= args.n_games:
             break
 
         print(f"\n  試行: {game_name} (appid={app_id})")
+
+        # --- ジャンル判定（軽い処理を先に。重いレビュー収集の前にフィルタ） ---
+        try:
+            genres = get_game_genres(app_id)
+        except Exception as e:
+            print(f"    ❌ ジャンル取得エラー: {e} → スキップ")
+            continue
+        time.sleep(0.3)  # appdetails APIへのrate limiting
+
+        real_genres = genres - NOISE_TAGS  # ノイズタグ(Indie等)を除去
+        if not real_genres:
+            print(f"    ⚠️ 有効なジャンルなし → スキップ")
+            continue
+
+        # (a) 完全一致dedup: 同じジャンルプロファイルは max_per_profile 本まで
+        if profile_counts.get(real_genres, 0) >= args.max_per_profile:
+            print(f"    ⚠️ プロファイル上限 {sorted(real_genres)} に到達 → スキップ")
+            continue
+
+        # (b) ジャンルキャップ: いずれかのジャンルが上限に達していたら弾く
+        over = sorted(g for g in real_genres if genre_counts.get(g, 0) >= args.max_per_genre)
+        if over:
+            print(f"    ⚠️ ジャンル上限 {over} に到達 → スキップ")
+            continue
+
+        # --- レビュー収集（重い処理） ---
         try:
             reviews = collect_balanced_reviews(
                 app_id=app_id,
@@ -167,8 +235,12 @@ def main():
             r['sentiment'] = 0
             all_reviews.append(r)
 
-        collected_games.append((app_id, game_name))
-        print(f"    ✅ 採用 ({len(collected_games)}/{args.n_games})")
+        # 採用記録を更新（ジャンルカウント・使用済み集合）
+        collected_games.append((app_id, game_name, sorted(real_genres)))
+        profile_counts[real_genres] = profile_counts.get(real_genres, 0) + 1
+        for g in real_genres:
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+        print(f"    ✅ 採用 ({len(collected_games)}/{args.n_games}) ジャンル={sorted(real_genres)}")
 
     # 3. 保存
     print(f"\n[3/3] 保存...")
@@ -190,14 +262,22 @@ def main():
     print("\n" + "=" * 60)
     print("✅ 収集完了")
     print("=" * 60)
-    print(f"   採用ゲーム: {len(collected_games)}")
+    print(f"   採用ゲーム: {len(collected_games)} / 目標 {args.n_games}")
+    if len(collected_games) < args.n_games:
+        print(f"   ⚠️ 目標に未達。ジャンル上限(--max-per-genre={args.max_per_genre})が"
+              f"厳しすぎる可能性。下のジャンル分布を見て緩めて再走を検討してください。")
     print(f"   総レビュー: {len(df)}")
     if len(df) > 0:
         print(f"   Positive: {(df['sentiment']==1).sum()} / Negative: {(df['sentiment']==0).sum()}")
     print(f"   保存先: {args.output}")
+
     print(f"\n【採用ゲーム一覧】")
-    for aid, name in collected_games:
-        print(f"  - {name} ({aid})")
+    for aid, name, genres in collected_games:
+        print(f"  - {name} ({aid}) {genres}")
+
+    print(f"\n【ジャンル分布】（上限 {args.max_per_genre}）")
+    for g, c in sorted(genre_counts.items(), key=lambda x: -x[1]):
+        print(f"  - {g}: {c}本")
 
 
 if __name__ == '__main__':
