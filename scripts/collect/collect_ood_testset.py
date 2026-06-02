@@ -11,9 +11,13 @@ OODテストセット収集スクリプト
 - 目標: 20ゲーム × (Positive 50 + Negative 50) = 2000件（balanced）
 
 ジャンル偏り対策（特定ジャンルがテストセットを占有しないように）:
-- ノイズタグ（Indie / Free To Play）は判定から除外（遊びの種類を表さないため）
-- (a) 除去後のジャンル集合が採用済みと完全一致なら弾く（同一プロファイルの重複防止）
+- ノイズタグ（Indie / Free To Play / Early Access）は判定から除外（遊びの種類を表さないため）
+- (a) 除去後のジャンル集合が同一なら --max-per-profile 本までに制限（同一プロファイルの重複防止）
 - (b) 1ジャンルあたりの所属数に上限（--max-per-genre）を設ける（メインジャンルの偏り防止）
+
+似たゲーム除外（粗いgenresが取りこぼす細かい被りをユーザータグで検出）:
+- (C-2) storeページのユーザータグ上位N個を取得し、ノイズタグ(TAG_NOISE)を除去後、
+  採用済みゲームと閾値以上タグが共通する「似たゲーム」を弾く（例: Puzzle系・Roguelike系の重複）
 
 再利用可能な汎用ツールとして設計（他プロジェクトでも流用可）。
 """
@@ -21,6 +25,7 @@ OODテストセット収集スクリプト
 import os
 import sys
 import re
+import html
 import time
 import random
 import argparse
@@ -46,6 +51,14 @@ TRAIN_GAME_IDS = {
 # ジャンル判定から除外するノイズタグ
 # 遊びの種類ではなく、開発規模(Indie)・価格モデル(Free To Play)・販売ステータス(Early Access)を表すため
 NOISE_TAGS = {'Indie', 'Free To Play', 'Early Access'}
+
+# タグ重なり判定から除外するノイズタグ
+# 17本の実データ分析で「無関係なゲーム同士の誤爆」を生んでいたタグを特定（憶測ではなく実例ベース）。
+# 気分・機能・開発規模を表すもので、遊びの被りを意味しないため除外する。
+TAG_NOISE = {
+    'Singleplayer', 'Great Soundtrack', 'Atmospheric', 'Surreal',
+    'Free to Play', 'Indie', 'Early Access',
+}
 
 # Steam APIアクセス時のブラウザUA（データセンターIPからのブロック回避）
 HEADERS = {
@@ -131,15 +144,45 @@ def get_game_genres(app_id: int) -> frozenset:
     return frozenset(g['description'] for g in genres)
 
 
+def get_game_tags(app_id: int, n_tags: int = 6) -> list:
+    """
+    Steam storeページからユーザータグ（上位n_tags個）を取得
+
+    Steam公式の `genres` は粗く「Puzzle」「Roguelike」等の実ジャンルを取りこぼすため、
+    より粒度の細かいユーザータグを使って「似たゲーム」を検出する。タグはstoreページの
+    HTMLに埋め込まれているのでスクレイプする（appdetails APIには含まれない）。
+
+    Args:
+        app_id: SteamのアプリID
+        n_tags: 取得する上位タグ数
+
+    Returns:
+        上位n_tags個のタグ名リスト（取得失敗時は空リスト）
+    """
+    url = f"https://store.steampowered.com/app/{app_id}/"
+    headers = dict(HEADERS)
+    headers['Cookie'] = 'birthtime=0; mature_content=1'  # 年齢確認ゲートを回避
+    response = request_with_backoff(url, headers=headers, timeout=30)
+
+    # <a class="app_tag" ...>\n\tタグ名\t</a> からタグ名を抽出
+    raw = re.findall(r'class="app_tag"[^>]*>\s*([^<]+?)\s*</a>', response.text)
+    tags = [html.unescape(t).strip() for t in raw if t.strip()]
+    return tags[:n_tags]
+
+
 def main():
     parser = argparse.ArgumentParser(description='OODテストセット収集')
     parser.add_argument('--n-games', type=int, default=20, help='採用するゲーム数')
     parser.add_argument('--n-positive', type=int, default=50, help='1ゲームあたりPositive件数')
     parser.add_argument('--n-negative', type=int, default=50, help='1ゲームあたりNegative件数')
-    parser.add_argument('--max-per-genre', type=int, default=4,
+    parser.add_argument('--max-per-genre', type=int, default=6,
                         help='1ジャンルあたりの最大採用数（ジャンル偏り防止）')
     parser.add_argument('--max-per-profile', type=int, default=2,
                         help='同じジャンル集合（プロファイル）あたりの最大採用数')
+    parser.add_argument('--n-tags', type=int, default=6,
+                        help='タグ重なり判定で見る上位タグ数')
+    parser.add_argument('--tag-overlap-threshold', type=int, default=2,
+                        help='採用済みゲームとこの数以上タグが共通したら「似たゲーム」として弾く')
     parser.add_argument('--seed', type=int, default=42, help='ランダムシード')
     parser.add_argument('--output', type=str, default='data/test/reviews_ood_2000.csv',
                         help='出力先CSVパス')
@@ -165,10 +208,11 @@ def main():
     random.shuffle(candidates)
 
     # 2. 各ゲームから条件付き収集
-    print(f"\n[2/3] 条件付き収集（ジャンル偏り対策＋P/N両方が目標数取れたゲームのみ採用）...")
+    print(f"\n[2/3] 条件付き収集（ジャンル偏り対策＋タグ重なり除外＋P/N両方が目標数取れたゲームのみ採用）...")
     print(f"   ジャンル上限: 1ジャンルあたり最大{args.max_per_genre}本 / "
           f"同一プロファイル最大{args.max_per_profile}本")
-    collected_games = []      # (app_id, name, sorted_genres) のリスト
+    print(f"   タグ重なり: 上位{args.n_tags}タグ中{args.tag_overlap_threshold}個以上共通で弾く")
+    collected_games = []      # (app_id, name, sorted_genres, real_tags) のリスト
     all_reviews = []
     genre_counts = {}         # ジャンル名 -> 採用済み本数
     profile_counts = {}       # ジャンル集合(frozenset) -> 採用済み本数（完全一致dedup用）
@@ -203,6 +247,26 @@ def main():
             print(f"    ⚠️ ジャンル上限 {over} に到達 → スキップ")
             continue
 
+        # (C-2) タグ重なり除外: 採用済みゲームとタグが多数共通する「似たゲーム」を弾く
+        # （genresは粗くPuzzle/Roguelike等の実ジャンルを取りこぼすため、細かいタグで判定）
+        try:
+            tags = get_game_tags(app_id, n_tags=args.n_tags)
+        except Exception as e:
+            print(f"    ❌ タグ取得エラー: {e} → スキップ")
+            continue
+        time.sleep(0.3)  # storeページへのrate limiting
+
+        real_tags = set(tags) - TAG_NOISE  # ノイズタグ(Singleplayer等)を除去
+        similar_to = None
+        for _aid, prev_name, _g, prev_tags in collected_games:
+            common = real_tags & prev_tags
+            if len(common) >= args.tag_overlap_threshold:
+                similar_to = (prev_name, sorted(common))
+                break
+        if similar_to:
+            print(f"    ⚠️ タグ重なり {similar_to[1]} （{similar_to[0]}と類似）→ スキップ")
+            continue
+
         # --- レビュー収集（重い処理） ---
         try:
             reviews = collect_balanced_reviews(
@@ -235,12 +299,13 @@ def main():
             r['sentiment'] = 0
             all_reviews.append(r)
 
-        # 採用記録を更新（ジャンルカウント・使用済み集合）
-        collected_games.append((app_id, game_name, sorted(real_genres)))
+        # 採用記録を更新（ジャンルカウント・プロファイルカウント・タグ集合）
+        collected_games.append((app_id, game_name, sorted(real_genres), real_tags))
         profile_counts[real_genres] = profile_counts.get(real_genres, 0) + 1
         for g in real_genres:
             genre_counts[g] = genre_counts.get(g, 0) + 1
-        print(f"    ✅ 採用 ({len(collected_games)}/{args.n_games}) ジャンル={sorted(real_genres)}")
+        print(f"    ✅ 採用 ({len(collected_games)}/{args.n_games}) "
+              f"ジャンル={sorted(real_genres)} タグ={sorted(real_tags)}")
 
     # 3. 保存
     print(f"\n[3/3] 保存...")
@@ -272,8 +337,8 @@ def main():
     print(f"   保存先: {args.output}")
 
     print(f"\n【採用ゲーム一覧】")
-    for aid, name, genres in collected_games:
-        print(f"  - {name} ({aid}) {genres}")
+    for aid, name, genres, tags in collected_games:
+        print(f"  - {name} ({aid}) ジャンル={genres} タグ={sorted(tags)}")
 
     print(f"\n【ジャンル分布】（上限 {args.max_per_genre}）")
     for g, c in sorted(genre_counts.items(), key=lambda x: -x[1]):
