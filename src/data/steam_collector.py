@@ -13,6 +13,54 @@ from langdetect import DetectorFactory
 DetectorFactory.seed = 0  # 再現性のために固定
 
 
+def request_with_backoff(
+    url: str,
+    params: Optional[Dict] = None,
+    headers: Optional[Dict] = None,
+    timeout: int = 10,
+    max_retries: int = 5,
+    base_wait: float = 1.0,
+) -> requests.Response:
+    """
+    指数バックオフ付きでGETリクエストを実行
+
+    429（レート制限・bot判定）など一時的なエラー時は待ち時間を倍々に伸ばしてリトライする。
+    短い間隔でリトライを繰り返してブロックが解けないまま延々失敗し続けるのを防ぐ。
+
+    Args:
+        url: リクエストURL
+        params: クエリパラメータ
+        headers: リクエストヘッダ
+        timeout: タイムアウト秒数
+        max_retries: 最大リトライ回数
+        base_wait: バックオフの基準待ち時間（秒）。attempt回目は base_wait * 2**attempt 秒待つ。
+            429の場合はさらに10倍長く待つ（レート制限の解除には時間がかかるため）。
+
+    Returns:
+        成功時のrequests.Response
+
+    Raises:
+        requests.exceptions.RequestException: 全リトライ失敗時
+    """
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            # 最後の試行で失敗したら例外を投げる
+            if attempt == max_retries - 1:
+                raise
+            # HTTPステータスを取得（429=レート制限か判定）
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            wait = base_wait * (2 ** attempt)
+            if status == 429:
+                wait *= 10  # レート制限は桁違いに長く待つ
+            print(f"    ⏳ リクエスト失敗 (status={status}, "
+                  f"{attempt + 1}/{max_retries}回目) → {wait:.0f}秒待機してリトライ")
+            time.sleep(wait)
+
+
 def is_valid_english_review(text: str, min_length: int = 20, lang_confidence: float = 0.8) -> bool:
     """
     レビューが有効な英語かどうかを判定
@@ -66,7 +114,7 @@ def get_steam_reviews(
     language: str = 'english',
     review_type: str = 'all',
     num: int = 100,
-    max_retries: int = 3
+    max_retries: int = 5
 ) -> List[Dict]:
     """
     Steam APIからレビューを収集
@@ -126,19 +174,11 @@ def get_steam_reviews(
     while len(reviews) < num:
         params['cursor'] = cursor
 
-        # retry付きAPIリクエスト
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(f"{base_url}{app_id}", params=params, timeout=10)
-                response.raise_for_status()
-                data = response.json()
-                break
-            except requests.exceptions.RequestException as e:
-                if attempt == max_retries - 1:
-                    raise requests.exceptions.RequestException(
-                        f"Failed to fetch reviews after {max_retries} attempts: {e}"
-                    )
-                time.sleep(1)  # retry前の待機
+        # retry付きAPIリクエスト（429レート制限は指数バックオフで待機）
+        response = request_with_backoff(
+            f"{base_url}{app_id}", params=params, timeout=10, max_retries=max_retries
+        )
+        data = response.json()
 
         # APIレスポンス確認
         if data.get('success') != 1:
