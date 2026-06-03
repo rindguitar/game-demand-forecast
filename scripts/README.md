@@ -40,6 +40,7 @@ make collect-20k    # 20000件収集
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
+| `train_dapt.py` | DAPT（未ラベルレビューでMLM継続学習・ドメイン適応モデル作成） |
 | `extract_topics.py` | BERTopicによるトピック抽出（本番実行） |
 
 **使用方法:**
