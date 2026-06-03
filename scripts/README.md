@@ -21,13 +21,16 @@ Steam APIからレビューデータを収集するスクリプト。
 
 | ファイル | 説明 |
 |---|---|
-| `collect_dataset_10k.py` | 10000件のbalancedレビューを収集（推奨） |
+| `collect_dataset_10k.py` | 10000件のbalancedレビューを収集（学習用・推奨） |
 | `collect_dataset_20k.py` | 20000件のbalancedレビューを収集 |
+| `collect_ood_testset.py` | OOD評価用テストセット収集（未知20ゲーム・ジャンル/タグ偏り対策） |
+| `collect_dapt_corpus.py` | DAPT用の未ラベルコーパス収集（多様な10万件・OOD/学習ゲーム除外） |
 
 **使用方法:**
 ```bash
-make collect-10k    # 10000件収集
-make collect-20k    # 20000件収集
+make collect-10k           # 10000件（学習用）
+make collect-ood           # OODテストセット
+make collect-dapt-corpus   # DAPT用コーパス（10万件・未ラベル）
 ```
 
 ---
@@ -45,9 +48,11 @@ make collect-20k    # 20000件収集
 
 **使用方法:**
 ```bash
-make train-sentiment    # 推奨設定で学習（10000件・best_model上書き）
-make train-test         # パイプライン確認用（短時間）
-make extract-topics     # トピック抽出実行
+make train-sentiment       # vanillaベースライン（best_model_pre_dapt上書き）
+make train-dapt            # DAPT（MLM継続学習・要コーパス）
+make train-sentiment-dapt  # DAPT baseで微調整（best_model上書き・本番）
+make train-test            # パイプライン確認用（短時間）
+make extract-topics        # トピック抽出
 ```
 
 `train_sentiment.py` は `scripts/experiments/learning_curve_experiment.py` からもimportされます。
@@ -65,6 +70,10 @@ make extract-topics     # トピック抽出実行
 | `analyze_learning_curve.py` | Learning Curve実験結果の分析・可視化 |
 | `validate_sentiment_english.py` | 英語100件での感情分析精度検証 |
 | `bertopic_experiment.py` | BERTopicパラメータ実験 |
+| `analyze_misclassified.py` | 誤分類の抽出（モデル誤りのbaseline取得） |
+| `categorize_misclassified.py` | 誤分類のヒューリスティックタグ付け（誤りの傾向分析） |
+| `explain_misclassified.py` | 誤分類の解釈（Layer Integrated Gradientsで寄与語抽出） |
+| `compare_models_ood.py` | 複数モデルのOOD性能比較（accuracy/P/R/F1・McNemar） |
 
 **使用方法:**
 ```bash

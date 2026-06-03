@@ -89,11 +89,22 @@ make help
 # テスト用学習（パイプライン確認用・best_modelを上書きしない）
 make train-test
 
-# 推奨設定で学習（10000件・⚠️ best_modelを上書き）
+# vanillaベースライン学習（⚠️ best_model_pre_dapt を上書き）
 make train-sentiment
 
 # カスタム設定で学習
 make train-custom DATASET=data/train/reviews_5000.csv OUTPUT=models/my_model SEED=123
+```
+
+### DAPT（ドメイン適応事前学習）パイプライン
+
+未ラベルSteamレビューでDistilBERTをゲームドメインに適応させ、その上で感情分析を微調整する（未知ゲームでの精度向上を確認済み）。
+
+```bash
+make collect-dapt-corpus   # 未ラベルコーパス収集（10万件・OOD/学習ゲーム除外）
+make train-dapt            # MLM継続学習 → models/dapt_distilbert
+make train-sentiment-dapt  # DAPT baseで微調整 → models/best_model（本番）
+make compare-ood           # OOD性能比較（DAPT vs sst-2 ほか）
 ```
 
 ### テスト実行
@@ -117,7 +128,8 @@ game-demand-forecast/
 ├── scripts/           # 実行スクリプト → scripts/README.md
 │   ├── collect/      # データ収集
 │   ├── nlp/          # NLP本番実行
-│   └── experiments/  # 実験・検証・ベンチマーク
+│   ├── experiments/  # 実験・検証・分析
+│   └── benchmarks/   # 性能・実行可能性の計測
 ├── tests/             # テストコード → tests/README.md
 │   ├── test_data/    # データ収集・前処理テスト
 │   └── test_nlp/     # NLPテスト
