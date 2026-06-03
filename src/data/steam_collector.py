@@ -12,6 +12,13 @@ from langdetect import detect_langs, LangDetectException
 from langdetect import DetectorFactory
 DetectorFactory.seed = 0  # 再現性のために固定
 
+# Steam APIアクセス時のブラウザUA（データセンターIPからのブロック回避）
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/120.0 Safari/537.36'
+}
+
 
 def request_with_backoff(
     url: str,
@@ -59,6 +66,57 @@ def request_with_backoff(
             print(f"    ⏳ リクエスト失敗 (status={status}, "
                   f"{attempt + 1}/{max_retries}回目) → {wait:.0f}秒待機してリトライ")
             time.sleep(wait)
+
+
+def get_popular_games(n_pages: int = 20) -> list:
+    """
+    Steam公式の検索APIからレビュー数順の人気ゲームを取得（レビューが豊富な母集団）
+
+    Steam公式の検索結果JSONはappidを直接持たず、ロゴ画像URLに埋め込まれているため、
+    正規表現で抽出する。
+
+    Args:
+        n_pages: 取得ページ数（1ページ約25件、20ページで約500件）
+
+    Returns:
+        (app_id, game_name)のリスト（レビュー数の多い順）
+    """
+    base_url = "https://store.steampowered.com/search/results/"
+
+    games = []
+    seen = set()
+
+    for page in range(n_pages):
+        params = {
+            'query': '',
+            'start': page * 25,
+            'count': 25,
+            'sort_by': 'Reviews_DESC',  # レビュー数の多い順
+            'category1': 998,           # 998 = ゲームのみ（DLC・ツール等を除外）
+            'json': 1,
+        }
+        response = request_with_backoff(base_url, params=params, headers=HEADERS, timeout=30)
+        data = response.json()
+
+        items = data.get('items', [])
+        if not items:
+            break
+
+        for item in items:
+            logo = item.get('logo', '')
+            # ロゴURL内の /apps/<appid>/ からappidを抽出
+            match = re.search(r'/apps/(\d+)/', logo)
+            if not match:
+                continue
+            app_id = int(match.group(1))
+            if app_id in seen:
+                continue
+            seen.add(app_id)
+            games.append((app_id, item.get('name', 'Unknown')))
+
+        time.sleep(0.5)  # Steam APIへのrate limiting
+
+    return games
 
 
 def is_valid_english_review(text: str, min_length: int = 20, lang_confidence: float = 0.8) -> bool:

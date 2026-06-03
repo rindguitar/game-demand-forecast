@@ -34,7 +34,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import pandas as pd
 
-from src.data.steam_collector import collect_balanced_reviews, request_with_backoff
+from src.data.steam_collector import (
+    collect_balanced_reviews,
+    request_with_backoff,
+    get_popular_games,
+    HEADERS,
+)
 
 
 # 学習に使った7ゲーム（テストでは除外）
@@ -59,65 +64,6 @@ TAG_NOISE = {
     'Singleplayer', 'Great Soundtrack', 'Atmospheric', 'Surreal',
     'Free to Play', 'Indie', 'Early Access',
 }
-
-# Steam APIアクセス時のブラウザUA（データセンターIPからのブロック回避）
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                  'AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/120.0 Safari/537.36'
-}
-
-
-def get_popular_games(n_pages: int = 20) -> list:
-    """
-    Steam公式の検索APIからレビュー数順の人気ゲームを取得（レビューが豊富な母集団）
-
-    Steam公式の検索結果JSONはappidを直接持たず、ロゴ画像URLに埋め込まれているため、
-    正規表現で抽出する。
-
-    Args:
-        n_pages: 取得ページ数（1ページ約25件、20ページで約500件）
-
-    Returns:
-        (app_id, game_name)のリスト（レビュー数の多い順）
-    """
-    base_url = "https://store.steampowered.com/search/results/"
-
-    games = []
-    seen = set()
-
-    for page in range(n_pages):
-        params = {
-            'query': '',
-            'start': page * 25,
-            'count': 25,
-            'sort_by': 'Reviews_DESC',  # レビュー数の多い順
-            'category1': 998,           # 998 = ゲームのみ（DLC・ツール等を除外）
-            'json': 1,
-        }
-        response = request_with_backoff(base_url, params=params, headers=HEADERS, timeout=30)
-        data = response.json()
-
-        items = data.get('items', [])
-        if not items:
-            break
-
-        for item in items:
-            logo = item.get('logo', '')
-            # ロゴURL内の /apps/<appid>/ からappidを抽出
-            match = re.search(r'/apps/(\d+)/', logo)
-            if not match:
-                continue
-            app_id = int(match.group(1))
-            if app_id in seen:
-                continue
-            seen.add(app_id)
-            games.append((app_id, item.get('name', 'Unknown')))
-
-        time.sleep(0.5)  # Steam APIへのrate limiting
-
-    return games
-
 
 def get_game_genres(app_id: int) -> frozenset:
     """
