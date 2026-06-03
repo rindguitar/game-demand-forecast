@@ -38,7 +38,7 @@ MIXED_WORDS = ['but', 'however', 'although', 'though', 'despite']
 # スラング・口語的なネガティブ表現（標準的なネガティブ語と区別）
 STRONG_NEGATIVE_WORDS = [
     'bs', 'garbage', 'trash', 'shit', 'crap', 'suck', 'sucks', 'sucked',
-    'cheaters', 'stupid', 'cancer', 'toxic',
+    'cheaters', 'cheater', 'cheating', 'cheats', 'stupid', 'cancer', 'toxic',
 ]
 
 RATING_PATTERNS = [
@@ -46,12 +46,85 @@ RATING_PATTERNS = [
     r'\b1/10\b', r'\b9/10\b',
 ]
 
-SLANG_WORDS = ['fr', 'no cap', 'slaps', 'mid', 'ngl', 'based', 'cringe']
+SLANG_WORDS = [
+    'fr', 'no cap', 'slaps', 'mid', 'ngl', 'based', 'cringe',
+    # 診断で取りこぼしが判明したゲームスラングを追加（一般英語と紛れにくい語中心）
+    'goat', 'goated', 'ez', 'sus', 'gg', 'banger', 'cooked', 'washed',
+    'cope', 'bussin', 'dogwater', 'gigachad', 'sweaty',
+]
+
+# バグ・クラッシュ
+BUG_WORDS = [
+    'bug', 'bugs', 'buggy', 'crash', 'crashes', 'crashing', 'crashed',
+    'glitch', 'glitches', 'glitchy', 'freeze', 'freezes', 'freezing', 'froze',
+    'lag', 'laggy', 'unplayable', 'broken', 'unstable', 'error', 'errors',
+]
+
+# 運営・開発元への批判（明確にネガティブな語・句に限定）
+DEV_CRITICISM_WORDS = [
+    'greedy', 'cash grab', 'cashgrab', 'money grab', 'abandoned', 'milking',
+    'dead game', 'no support', 'anti-consumer', 'anti consumer', 'scummy',
+    'lazy devs', 'soulless', 'cash cow',
+]
+
+# DLC・完全版商法
+DLC_WORDS = [
+    'dlc', 'season pass', 'microtransaction', 'microtransactions', 'paywall',
+    'cut content', 'day one dlc', 'day-one dlc', 'complete edition',
+    'definitive edition', 'should be free', 'behind a paywall', 'overpriced',
+]
+
+# 条件法・反実仮想（「もし〜だったら（良かったのに）」型の遠回しな不満）
+CONDITIONAL_PATTERNS = [
+    r'\b(would|could|should|might)\s+have\s+been\b',
+    r'\bif only\b',
+    r'\b(would|could)\s+be\b[^.!?]{0,40}\bif\b',
+    r'\bwould have\b',
+    r'\bcould have\b',
+]
+
+# 皮肉マーカー（明示的な目印のみ。一般的な皮肉は文脈依存で検出不能）
+SARCASM_MARKER_PATTERNS = [
+    r'"\s*(great|amazing|good|best|fun|wonderful|perfect|fantastic|brilliant|masterpiece)\s*"',
+    r'/s\b',
+    r'\boh\s+(great|wonderful|joy|boy|yeah)\b',
+    r'\byeah\s+right\b',
+    r'\bwhat a (surprise|shocker)\b',
+]
+
+# 時系列の変化（評価が時間で反転：過去は良かった→今は悪い 等）
+TEMPORAL_PATTERNS = [
+    r'\bused to\b',
+    r'\buntil (the |an |a )?(update|patch|dlc|expansion)\b',
+    r'\bno longer\b',
+    r'\bever since\b',
+    r'\bnowadays\b',
+    r'\bthese days\b',
+    r'\bback (then|in the day)\b',
+]
+
+# 顔文字検出
+# ① スタンプ系（Unicode絵文字）：ASCIIフィルタ済みデータでは0になるが、盲点の記録として残す
+EMOJI_PATTERN = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U00002190-\U000021FF\U00002B00-\U00002BFF\U0000FE00-\U0000FE0F]"
+)
+# ② テキスト系顔文字：記号を含む形に限定し、単語内の xp/xc 等の誤検出を排除
+EMOTICON_PATTERN = re.compile(
+    r"(?:[:;=8][-o^']?[)(\]\[DPpoO3<>|])"   # :) :( :D :P :3 :| ;) 8) =D
+    r"|</?3"                                 # <3 </3
+    r"|(?<![A-Za-z])[xX]D(?![A-Za-z])"      # xD XD（単語境界）
+    r"|\^[_.]?\^"                           # ^^ ^_^ ^.^
+    r"|[oO][_.][oO]"                        # o_o O.O
+    r"|[tT]_[tT]|;_;"                       # T_T ;_;
+    r"|>:[()]"                              # >:( >:)
+)
 
 # 表示順（集計表示時の順番）
 TAG_ORDER = [
-    '否定語あり', '二重否定構造', '接続詞混合', '強ネガ表現',
-    '評価記号', 'スラング', '全大文字', '短文', '長文',
+    '否定語あり', '二重否定構造', '接続詞混合', '条件法', '皮肉マーカー',
+    '時系列変化', '強ネガ表現', 'バグ・クラッシュ', '運営批判', 'DLC商法',
+    '評価記号', 'スラング', '顔文字', '全大文字', '短文', '長文',
 ]
 
 
@@ -117,6 +190,34 @@ def assign_tags(text: str) -> list[str]:
     # スラング
     if _contains_word(text_lower, SLANG_WORDS):
         tags.append('スラング')
+
+    # 顔文字（①Unicode絵文字 ②テキスト顔文字）
+    if EMOJI_PATTERN.search(text) or EMOTICON_PATTERN.search(text):
+        tags.append('顔文字')
+
+    # 条件法・反実仮想（「もし〜だったら」型の遠回しな不満）
+    if any(re.search(p, text_lower) for p in CONDITIONAL_PATTERNS):
+        tags.append('条件法')
+
+    # 皮肉マーカー（明示的な目印のみ）
+    if any(re.search(p, text_lower) for p in SARCASM_MARKER_PATTERNS):
+        tags.append('皮肉マーカー')
+
+    # 時系列の変化（評価が時間で反転）
+    if any(re.search(p, text_lower) for p in TEMPORAL_PATTERNS):
+        tags.append('時系列変化')
+
+    # バグ・クラッシュ
+    if _contains_word(text_lower, BUG_WORDS):
+        tags.append('バグ・クラッシュ')
+
+    # 運営・開発元への批判
+    if _contains_word(text_lower, DEV_CRITICISM_WORDS):
+        tags.append('運営批判')
+
+    # DLC・完全版商法
+    if _contains_word(text_lower, DLC_WORDS):
+        tags.append('DLC商法')
 
     # 全大文字強調
     if _is_all_caps(text):
