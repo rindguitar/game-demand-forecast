@@ -37,7 +37,8 @@ help:
 	@echo "  make extract-topics     - トピック抽出（10000件レビュー）"
 	@echo "  make learning-curve     - Learning Curve実験（10k vs 20k）"
 	@echo "  make analyze-curve      - Learning Curve結果分析・可視化"
-	@echo "  make train-sentiment    - 感情分析モデル学習（10000件・⚠️best_model上書き）"
+	@echo "  make train-sentiment      - vanillaベースライン学習（⚠️best_model_pre_dapt上書き）"
+	@echo "  make train-sentiment-dapt - DAPT本番モデル学習（⚠️best_model上書き）"
 	@echo "  make train-test         - テスト用学習（1000件・test_modelに保存）"
 	@echo "  make train-custom       - カスタム設定で学習"
 	@echo "  make train-prophet      - Prophet学習"
@@ -134,11 +135,24 @@ analyze-curve:
 extract-topics:
 	docker-compose exec dev python scripts/nlp/extract_topics.py
 
-# 感情分析モデル学習（推奨設定：10000件、seed=42、lr=1e-5）
-# ⚠️ 警告: models/best_model/ を上書きします
+# 感情分析モデル学習（vanilla base＝DAPT前のベースライン）
+# ⚠️ 警告: models/best_model_pre_dapt/ を上書きします
 train-sentiment:
 	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
+		--output models/best_model_pre_dapt \
+		--seed 42 \
+		--batch-size 16 \
+		--epochs 10 \
+		--lr 1e-5 \
+		--patience 3
+
+# DAPT済みモデルをbaseに感情分析を微調整（③・本番モデル）
+# ⚠️ models/best_model/ を上書き。事前に models/dapt_distilbert/ が必要（python scripts/nlp/train_dapt.py）
+train-sentiment-dapt:
+	docker-compose exec dev python scripts/nlp/train_sentiment.py \
+		--dataset data/train/reviews_10000.csv \
+		--base-model models/dapt_distilbert \
 		--output models/best_model \
 		--seed 42 \
 		--batch-size 16 \

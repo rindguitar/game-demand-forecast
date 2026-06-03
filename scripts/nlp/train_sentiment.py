@@ -27,6 +27,7 @@ from src.nlp.evaluation import evaluate_sentiment_model
 def train_sentiment(
     dataset_path: str,
     output_dir: str,
+    base_model: str = 'distilbert-base-uncased',
     random_seed: int = 42,
     batch_size: int = 16,
     epochs: int = 10,
@@ -107,7 +108,7 @@ def train_sentiment(
     if verbose:
         print(f"\n2. Tokenizer & DataLoader作成")
 
-    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     train_loader, val_loader, test_loader = create_dataloaders(
         train_df, val_df, test_df, tokenizer, batch_size=batch_size
@@ -123,7 +124,7 @@ def train_sentiment(
     if verbose:
         print(f"\n3. モデル初期化")
 
-    model = SentimentClassifier()
+    model = SentimentClassifier(model_name=base_model)
     model.to(device)
 
     if verbose:
@@ -224,6 +225,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--patience', type=int, default=3, help='Early stopping patience')
+    parser.add_argument('--base-model', type=str, default='distilbert-base-uncased',
+                        help='ベースモデル（DAPT済みディレクトリのパスも指定可）')
 
     args = parser.parse_args()
 
@@ -234,7 +237,8 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.lr,
-        patience=args.patience
+        patience=args.patience,
+        base_model=args.base_model
     )
 
     print("\n" + "=" * 70)
