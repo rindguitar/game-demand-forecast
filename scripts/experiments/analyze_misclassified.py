@@ -1,19 +1,17 @@
 """
-誤分類分析スクリプト
+誤分類抽出スクリプト
 
-現行の感情分析モデル（models/best_model）でreviews_10000.csv全件を予測し、
-正解ラベル（voted_up由来のlabel列）と一致しない事例を抽出する。
+指定モデル(--model)で未知データ(--input, OOD等)を予測し、誤分類した事例を抽出する。
+モデルの「汎化」の誤りを見るのが目的なので、訓練データではなく未知データに当てる。
+正解列は label / sentiment のどちらでも可（自動判定）。
 
-将来的なモデル改善のベースライン取得が目的。
-
-出力:
-    - data/experiments/sarcasm_baseline/misclassified.csv（最新のみ・上書き）
-    - data/experiments/sarcasm_baseline/summary.csv（全モデルの集計・追記）
+出力: <output-dir>/misclassified_<model>.csv ＋ summary.csv
 """
 
 import sys
 import os
 import json
+import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
@@ -80,18 +78,27 @@ def append_summary(summary_path: str, row: dict):
 
 
 def main():
-    print("=" * 70)
-    print("誤分類分析: reviews_10000.csv vs models/best_model")
-    print("=" * 70)
+    parser = argparse.ArgumentParser(description='誤分類抽出（任意モデル × 未知データ）')
+    parser.add_argument('--input', default='data/test/reviews_ood_2000.csv',
+                        help='評価する未知データCSV（label または sentiment 列）')
+    parser.add_argument('--model', default='models/best_model', help='モデルディレクトリ')
+    parser.add_argument('--output', default=None,
+                        help='誤分類CSV出力先（未指定なら <output-dir>/misclassified_<model>.csv）')
+    parser.add_argument('--output-dir', default='data/experiments/ood_benchmark',
+                        help='出力ディレクトリ')
+    args = parser.parse_args()
 
-    # パス設定
-    input_path = 'data/train/reviews_10000.csv'
-    model_dir = 'models/best_model'
-    output_dir = 'data/experiments/sarcasm_baseline'
-    misclassified_path = os.path.join(output_dir, 'misclassified.csv')
+    input_path = args.input
+    model_dir = args.model
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    model_name = os.path.basename(model_dir.rstrip('/'))
+    misclassified_path = args.output or os.path.join(output_dir, f'misclassified_{model_name}.csv')
     summary_path = os.path.join(output_dir, 'summary.csv')
 
-    os.makedirs(output_dir, exist_ok=True)
+    print("=" * 70)
+    print(f"誤分類抽出: {input_path} vs {model_dir}")
+    print("=" * 70)
 
     # 1. モデルメタデータ読み込み（training_results.jsonから）
     results_path = os.path.join(model_dir, 'training_results.json')
@@ -108,9 +115,11 @@ def main():
     print(f"  学習タイムスタンプ: {training_info['timestamp']}")
     print(f"  ハイパーパラメータ: {training_info['hyperparameters']}")
 
-    # 2. データ読み込み
+    # 2. データ読み込み（正解列を label に正規化：sentimentならrename）
     df = pd.read_csv(input_path)
     df = df.dropna(subset=['review_text']).reset_index(drop=True)
+    if 'label' not in df.columns and 'sentiment' in df.columns:
+        df = df.rename(columns={'sentiment': 'label'})
     print(f"\n[2/4] データ読み込み: {len(df)}件")
 
     # 3. モデル読み込み・予測
