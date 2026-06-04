@@ -1,11 +1,13 @@
 """
 トピック抽出実行スクリプト（本番用）
 
-10000件のレビューデータからBERTopicでトピックを抽出し、結果をCSVに保存する。
+レビューCSV（--input）からBERTopicでトピックを抽出し、結果をCSVに保存する。
+本番では時系列予測時に収集した未知レビューを --input に指定する。
 """
 
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import pandas as pd
@@ -23,13 +25,26 @@ from src.nlp.topic import (
 def main():
     """トピック抽出のメイン実行関数"""
 
+    parser = argparse.ArgumentParser(description='BERTopicでトピック抽出')
+    parser.add_argument('--input', default='data/train/reviews_10000.csv',
+                        help='レビューCSV（review_text列が必須）')
+    parser.add_argument('--output', default=None,
+                        help='トピック付与CSV出力先（未指定なら <input>_with_topics.csv）')
+    parser.add_argument('--stats-output', default=None,
+                        help='トピック統計CSV出力先（未指定なら入力と同ディレクトリのtopic_statistics.csv）')
+    args = parser.parse_args()
+
+    input_path = args.input
+    stem, ext = os.path.splitext(input_path)
+    output_path = args.output or f'{stem}_with_topics{ext}'
+    stats_output_path = args.stats_output or os.path.join(os.path.dirname(input_path), 'topic_statistics.csv')
+
     print("=" * 80)
-    print("🔍 トピック抽出実行（10000件レビュー）")
+    print("🔍 トピック抽出実行")
     print("=" * 80)
 
     # 1. データ読み込み
     print("\n[1/5] データ読み込み")
-    input_path = 'data/train/reviews_10000.csv'
     df = pd.read_csv(input_path)
     df = df.dropna(subset=['review_text'])
     print(f"   ✓ 読み込み完了: {len(df)}件（{input_path}）")
@@ -121,7 +136,6 @@ def main():
     df_english['topic_keywords'] = df_english['topic_id'].map(topic_words_map)
 
     # 保存
-    output_path = 'data/train/reviews_10000_with_topics.csv'
     df_english.to_csv(output_path, index=False)
     print(f"\n   ✓ レビュー+トピック結果: {output_path}")
     print(f"     - カラム: review_text, topic_id, topic_probability, topic_name, topic_keywords")
@@ -154,7 +168,6 @@ def main():
     df_stats = pd.DataFrame(topic_stats)
     df_stats = df_stats.sort_values('count', ascending=False)
 
-    stats_output_path = 'data/train/topic_statistics.csv'
     df_stats.to_csv(stats_output_path, index=False)
     print(f"   ✓ トピック統計: {stats_output_path}")
     print(f"     - カラム: topic_id, topic_name, keywords, count, percentage")
