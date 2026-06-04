@@ -1,19 +1,15 @@
 """
 誤分類サンプルのヒューリスティックタグ付け
 
-misclassified.csvの各レビューに、該当する全パターンをタグとして付与する。
+誤分類CSV（--input）の各レビューに、該当する全パターンをタグとして付与する。
 カテゴリ排他方式と異なり、1レビューに複数タグが付与可能。
 
-入力:
-    data/experiments/sarcasm_baseline/misclassified.csv
-
-出力:
-    data/experiments/sarcasm_baseline/misclassified_tagged.csv
-    （tags列・tag_count列を追加・confidence降順でソート）
+出力（--output）: tags列・tag_count列を追加し、confidence降順でソートしたCSV。
 """
 
 import os
 import re
+import argparse
 from collections import Counter
 from itertools import combinations
 
@@ -233,8 +229,15 @@ def assign_tags(text: str) -> list[str]:
 
 
 def main():
-    input_path = 'data/experiments/sarcasm_baseline/misclassified.csv'
-    output_path = 'data/experiments/sarcasm_baseline/misclassified_tagged.csv'
+    parser = argparse.ArgumentParser(description='誤分類サンプルのヒューリスティックタグ付け')
+    parser.add_argument('--input', required=True, help='誤分類CSV（review_text列が必須）')
+    parser.add_argument('--output', default=None,
+                        help='出力先（未指定なら <input>_tagged.csv）')
+    args = parser.parse_args()
+
+    input_path = args.input
+    stem, ext = os.path.splitext(input_path)
+    output_path = args.output or f'{stem}_tagged{ext}'
 
     print('=' * 70)
     print('誤分類サンプルのヒューリスティックタグ付け')

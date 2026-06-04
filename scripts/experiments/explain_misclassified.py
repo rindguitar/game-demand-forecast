@@ -2,14 +2,10 @@
 誤分類サンプルのモデル解釈性分析
 
 transformers-interpret（Layer Integrated Gradients）を使い、
-誤分類577件の各レビューに対してトークンごとの寄与度を算出する。
+誤分類CSV（--input）の各レビューに対してトークンごとの寄与度を算出する。
 
-入力:
-    data/experiments/sarcasm_baseline/misclassified.csv
-    models/best_model/
-
-出力:
-    data/experiments/sarcasm_baseline/explanations/
+入力: 誤分類CSV（--input・analyze_misclassified.pyの出力）＋ モデル（--model）
+出力: <出力先>/ 配下に
     ├── token_scores.csv    詳細：review_id × token × score
     ├── top_words.csv       集計：各レビューの上位5トークン
     └── summary.json        モデル全体の傾向：誤判定を引き起こす単語TOP
@@ -72,6 +68,11 @@ class HuggingFaceCompatibleWrapper(nn.Module):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='誤分類サンプルの解釈性分析')
+    parser.add_argument('--input', default='data/experiments/ood_benchmark/misclassified_best_model.csv',
+                        help='誤分類CSV（analyze_misclassified.pyの出力）')
+    parser.add_argument('--model', default='models/best_model', help='モデルディレクトリ')
+    parser.add_argument('--output-dir', default=None,
+                        help='出力先（未指定なら入力と同ディレクトリのexplanations/）')
     parser.add_argument('--limit', type=int, default=None,
                         help='処理件数の上限（デフォルト全件）')
     parser.add_argument('--confidence-min', type=float, default=None,
@@ -254,9 +255,9 @@ def build_summary(
 def main():
     args = parse_args()
 
-    input_path = 'data/experiments/sarcasm_baseline/misclassified.csv'
-    model_dir = 'models/best_model'
-    output_dir = 'data/experiments/sarcasm_baseline/explanations'
+    input_path = args.input
+    model_dir = args.model
+    output_dir = args.output_dir or os.path.join(os.path.dirname(input_path), 'explanations')
     token_scores_path = os.path.join(output_dir, 'token_scores.csv')
     top_words_path = os.path.join(output_dir, 'top_words.csv')
     summary_path = os.path.join(output_dir, 'summary.json')
