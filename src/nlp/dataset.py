@@ -91,7 +91,8 @@ def create_dataloaders(
     tokenizer: AutoTokenizer,
     batch_size: int = 32,
     max_length: int = 128,
-    num_workers: int = 0
+    num_workers: int = 0,
+    generator: torch.Generator = None
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Train/Val/TestのDataLoaderを作成
@@ -104,6 +105,7 @@ def create_dataloaders(
         batch_size: batch size（デフォルト32）
         max_length: 最大トークン長（デフォルト128）
         num_workers: DataLoaderのworker数（デフォルト0）
+        generator: Trainシャッフル用の乱数generator（再現性のため。Noneなら毎回ランダム）
 
     Returns:
         (train_loader, val_loader, test_loader)のタプル
@@ -153,7 +155,8 @@ def create_dataloaders(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,  # Trainはシャッフル
-        num_workers=num_workers
+        num_workers=num_workers,
+        generator=generator  # generator指定時はシャッフル順も再現可能
     )
 
     val_loader = DataLoader(

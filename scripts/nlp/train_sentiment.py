@@ -8,12 +8,14 @@ learning_curve_experiment.pyからもimport可能。
 import sys
 import os
 import json
+import random
 from datetime import datetime
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import torch
+import numpy as np
 import pandas as pd
 from transformers import AutoTokenizer
 from sklearn.model_selection import train_test_split
@@ -24,11 +26,24 @@ from src.nlp.train import train_model, evaluate
 from src.nlp.evaluation import evaluate_sentiment_model
 
 
+def set_seed(seed: int):
+    """
+    学習の乱数を固定（再現性のため）
+
+    データ分割(train_test_split)だけでなく、重み初期化・dropout・シャッフルも固定する。
+    詳細: Wiki「ランダムシード選択ガイド」
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
 def train_sentiment(
     dataset_path: str,
     output_dir: str,
     base_model: str = 'distilbert-base-uncased',
-    random_seed: int = 42,
+    random_seed: int = 0,
     batch_size: int = 16,
     epochs: int = 10,
     learning_rate: float = 1e-5,
@@ -60,6 +75,9 @@ def train_sentiment(
         print(f"学習実行: {dataset_path}")
         print(f"Random Seed: {random_seed}")
         print(f"{'=' * 70}")
+
+    # 乱数固定（データ分割だけでなく重み初期化・dropout・シャッフルまで再現可能にする）
+    set_seed(random_seed)
 
     # デバイス確認
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -110,8 +128,10 @@ def train_sentiment(
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
+    # シャッフル順も固定するためgeneratorを渡す
+    generator = torch.Generator().manual_seed(random_seed)
     train_loader, val_loader, test_loader = create_dataloaders(
-        train_df, val_df, test_df, tokenizer, batch_size=batch_size
+        train_df, val_df, test_df, tokenizer, batch_size=batch_size, generator=generator
     )
 
     if verbose:
@@ -220,7 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description='単一トライアル学習')
     parser.add_argument('--dataset', type=str, required=True, help='Dataset CSV path')
     parser.add_argument('--output', type=str, required=True, help='Output directory')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed（デフォルト0・連番運用）')
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')

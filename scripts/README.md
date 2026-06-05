@@ -1,15 +1,18 @@
 # scripts/
 
-実行スクリプト群。用途別に3つのサブディレクトリに分類されています。
+実行スクリプト群。用途別のサブディレクトリに分類されています。
 
 ## ディレクトリ構成
 
 ```
 scripts/
-├── collect/        # データ収集
-├── nlp/            # NLP本番実行
-├── experiments/    # 実験・検証・分析
-└── benchmarks/     # 性能・実行可能性の計測
+├── collect/            # データ収集
+├── nlp/                # NLP本番実行
+├── misclassification/  # 誤分類の分析パイプライン
+├── evaluation/         # モデル評価・比較・多シード検証
+├── learning_curve/     # データ量と精度の関係
+├── topic/              # トピック抽出実験
+└── benchmarks/         # 性能・実行可能性の計測
 ```
 
 ---
@@ -55,26 +58,47 @@ make train-test            # パイプライン確認用（短時間）
 make extract-topics        # トピック抽出
 ```
 
-`train_sentiment.py` は `scripts/experiments/learning_curve_experiment.py` からもimportされます。
+`train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。
 
 ---
 
-## experiments/ — 実験・検証・分析
+## misclassification/ — 誤分類の分析パイプライン
 
-モデル開発時に使用した実験・検証・分析用スクリプト。  
-本番運用では通常使用しません。
+誤分類を「抽出 → タグ付け → 2モデル差分 → 解釈 → 可視化」する分析ツール群。
+
+| ファイル | 説明 |
+|---|---|
+| `analyze_misclassified.py` | 任意モデル×未知データで誤分類を抽出（`--input`/`--model`） |
+| `categorize_misclassified.py` | 誤分類のヒューリスティックタグ付け（`--input`） |
+| `diff_misclassified.py` | 2モデルの誤分類差分（fixed/broke抽出・`--before`/`--after`） |
+| `explain_misclassified.py` | 誤分類の解釈（Layer Integrated Gradientsで寄与語抽出・`--input`/`--model`） |
+| `plot_dapt_diff.py` | DAPT前後の誤分類差分を可視化（fixed/broke・タグ別） |
+
+---
+
+## evaluation/ — モデル評価・比較・検証
+
+| ファイル | 説明 |
+|---|---|
+| `compare_models_ood.py` | 複数モデルのOOD性能比較（accuracy/P/R/F1・McNemar） |
+| `seed_study.py` | 多シードでDAPT効果を検証（Issue#24・平均±SD＋ペア検定・代表モデル選定） |
+| `validate_sentiment_english.py` | 英語100件での感情分析精度検証 |
+
+**使用方法:**
+```bash
+make compare-ood            # OOD性能比較
+make seed-study             # 多シード検証（GPU長時間。SEEDS=15で数変更）
+make seed-study-analyze     # 多シード検証の集計のみ
+```
+
+---
+
+## learning_curve/ — データ量と精度の関係
 
 | ファイル | 説明 |
 |---|---|
 | `learning_curve_experiment.py` | データ量と精度の関係を複数seedで検証 |
 | `analyze_learning_curve.py` | Learning Curve実験結果の分析・可視化 |
-| `validate_sentiment_english.py` | 英語100件での感情分析精度検証 |
-| `bertopic_experiment.py` | BERTopicパラメータ実験 |
-| `analyze_misclassified.py` | 任意モデル×未知データで誤分類を抽出（`--input`/`--model`） |
-| `categorize_misclassified.py` | 誤分類のヒューリスティックタグ付け（`--input`） |
-| `diff_misclassified.py` | 2モデルの誤分類差分（fixed/broke抽出・`--before`/`--after`） |
-| `explain_misclassified.py` | 誤分類の解釈（Layer Integrated Gradientsで寄与語抽出・`--input`/`--model`） |
-| `compare_models_ood.py` | 複数モデルのOOD性能比較（accuracy/P/R/F1・McNemar） |
 
 **使用方法:**
 ```bash
@@ -82,6 +106,14 @@ make learning-curve                        # 10k vs 20k で比較（デフォル
 make learning-curve SIZES="5000 10000"     # サイズを指定して比較
 make analyze-curve                         # 実験結果の分析・可視化
 ```
+
+---
+
+## topic/ — トピック抽出実験
+
+| ファイル | 説明 |
+|---|---|
+| `bertopic_experiment.py` | BERTopicパラメータ実験 |
 
 ---
 

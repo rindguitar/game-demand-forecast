@@ -49,6 +49,8 @@ help:
 	@echo "  make collect-dapt-corpus  - DAPT用コーパス収集（10万件・未ラベル）"
 	@echo "  make train-dapt           - DAPT実行（MLM継続学習）"
 	@echo "  make compare-ood          - OOD性能比較（DAPT vs sst-2 ほか）"
+	@echo "  make seed-study           - 多シード検証（Issue#24・GPU長時間。SEEDS=15で数変更）"
+	@echo "  make seed-study-analyze   - 多シード検証の集計のみ"
 
 # ============================================================
 # Docker操作
@@ -131,11 +133,11 @@ collect-20k:
 # Learning Curve実験（SIZES で比較サイズを指定可能。例: make learning-curve SIZES="10000 20000"）
 SIZES ?= 10000 20000
 learning-curve:
-	docker-compose exec dev python scripts/experiments/learning_curve_experiment.py --sizes $(SIZES)
+	docker-compose exec dev python scripts/learning_curve/learning_curve_experiment.py --sizes $(SIZES)
 
 # Learning Curve結果分析・可視化
 analyze-curve:
-	docker-compose exec dev python scripts/experiments/analyze_learning_curve.py
+	docker-compose exec dev python scripts/learning_curve/analyze_learning_curve.py
 
 # トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
 extract-topics:
@@ -188,7 +190,15 @@ train-dapt:
 
 # OOD性能比較（デフォルト DAPT vs sst-2。3つ巴は --models で指定）
 compare-ood:
-	docker-compose exec dev python scripts/experiments/compare_models_ood.py
+	docker-compose exec dev python scripts/evaluation/compare_models_ood.py
+
+# 多シード検証（Issue #24・GPU長時間。SEEDSでシード数変更可）
+seed-study:
+	docker-compose exec dev python scripts/evaluation/seed_study.py --n-seeds $(or $(SEEDS),15)
+
+# 多シード検証の集計のみ（学習せず既存結果を分析）
+seed-study-analyze:
+	docker-compose exec dev python scripts/evaluation/seed_study.py --analyze-only
 
 # テスト用学習（best_modelを上書きしない）
 train-test:
