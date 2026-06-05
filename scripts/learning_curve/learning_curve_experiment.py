@@ -19,7 +19,7 @@ from scripts.nlp.train_sentiment import train_sentiment
 
 def run_learning_curve_experiment(
     data_sizes: list = [1000, 5000, 10000, 20000],
-    seeds: list = [42, 123, 456],
+    seeds: list = [0, 1, 2],
     output_dir: str = 'data/experiments/learning_curve'
 ):
     """
@@ -183,8 +183,8 @@ def main():
         '--seeds',
         type=int,
         nargs='+',
-        default=[42, 123, 456],
-        help='ランダムシード（例: --seeds 42 123 456）'
+        default=[0, 1, 2],
+        help='ランダムシード（例: --seeds 0 1 2）'
     )
     parser.add_argument(
         '--output-dir',

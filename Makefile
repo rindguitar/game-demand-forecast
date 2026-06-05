@@ -149,7 +149,7 @@ train-sentiment:
 	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/best_model_pre_dapt \
-		--seed 42 \
+		--seed 0 \
 		--batch-size 16 \
 		--epochs 10 \
 		--lr 1e-5 \
@@ -162,7 +162,7 @@ train-sentiment-dapt:
 		--dataset data/train/reviews_10000.csv \
 		--base-model models/dapt_distilbert \
 		--output models/best_model \
-		--seed 42 \
+		--seed 0 \
 		--batch-size 16 \
 		--epochs 10 \
 		--lr 1e-5 \
@@ -205,7 +205,7 @@ train-test:
 	docker-compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/test_model \
-		--seed 42 \
+		--seed 0 \
 		--batch-size 16 \
 		--epochs 3 \
 		--lr 1e-5 \
