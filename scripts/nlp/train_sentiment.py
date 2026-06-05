@@ -43,7 +43,7 @@ def train_sentiment(
     dataset_path: str,
     output_dir: str,
     base_model: str = 'distilbert-base-uncased',
-    random_seed: int = 42,
+    random_seed: int = 0,
     batch_size: int = 16,
     epochs: int = 10,
     learning_rate: float = 1e-5,
@@ -240,7 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description='単一トライアル学習')
     parser.add_argument('--dataset', type=str, required=True, help='Dataset CSV path')
     parser.add_argument('--output', type=str, required=True, help='Output directory')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed（デフォルト0・連番運用）')
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
