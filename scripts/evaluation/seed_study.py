@@ -123,6 +123,41 @@ def run_grid(seeds, args, device):
             torch.cuda.empty_cache()
 
 
+def plot_seed_study(df: pd.DataFrame, out_path: str):
+    """シード別OOD精度の折れ線グラフ（DAPT vs vanilla・平均線・±SD帯）"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+
+    piv = df.pivot_table(index='seed', columns='base', values='ood_acc').sort_index()
+    seeds = list(piv.index)
+    colors = {'dapt': '#2ca02c', 'vanilla': '#d62728'}
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for base in ['vanilla', 'dapt']:
+        if base not in piv.columns:
+            continue
+        y = piv[base].values
+        m = float(np.nanmean(y))
+        sd = float(np.nanstd(y, ddof=1))
+        ax.fill_between(seeds, m - sd, m + sd, color=colors[base], alpha=0.10)
+        ax.axhline(m, color=colors[base], ls='--', lw=1, alpha=0.7)
+        ax.plot(seeds, y, '-o', color=colors[base], label=f'{base}  (mean {m:.2f} ± {sd:.2f})', zorder=3)
+
+    ax.set_xlabel('seed')
+    ax.set_ylabel('OOD accuracy (%)')
+    ax.set_xticks(seeds)
+    ax.set_title('Multi-seed OOD accuracy: DAPT vs vanilla', fontsize=12, fontweight='bold', pad=10)
+    ax.legend(loc='lower right')
+    ax.grid(axis='y', alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
+    print(f'  📈 グラフ保存: {out_path}')
+
+
 def analyze(results_path: str):
     """平均±SD・ペア検定・代表モデル候補を表示"""
     if not os.path.exists(results_path):
@@ -181,6 +216,13 @@ def analyze(results_path: str):
         print(f'    make exec CMD="python scripts/nlp/train_sentiment.py '
               f'--dataset {DATASET} --output models/best_model '
               f'--base-model {DAPT_BASE} --seed {int(mid["seed"])}"')
+
+    # シード別OOD精度の折れ線グラフを保存
+    out_png = os.path.join(os.path.dirname(results_path) or '.', 'seed_study.png')
+    try:
+        plot_seed_study(df, out_png)
+    except Exception as e:
+        print(f'  (グラフ生成スキップ: {e})')
     print('=' * 64)
 
 
