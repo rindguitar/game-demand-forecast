@@ -56,35 +56,35 @@ help:
 # Docker操作
 # ============================================================
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 
 down:
-	docker-compose down
+	docker compose down
 
 restart:
-	docker-compose restart
+	docker compose restart
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 shell:
-	docker-compose exec dev bash
+	docker compose exec dev bash
 
 exec:
-	docker-compose exec dev $(CMD)
+	docker compose exec dev $(CMD)
 
 # ============================================================
 # 環境確認
 # ============================================================
 gpu-check:
-	docker-compose exec dev python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('GPU count:', torch.cuda.device_count()); print('GPU name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+	docker compose exec dev python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('GPU count:', torch.cuda.device_count()); print('GPU name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
 
 python-version:
-	docker-compose exec dev python --version
-	docker-compose exec dev pip --version
+	docker compose exec dev python --version
+	docker compose exec dev pip --version
 
 # ============================================================
 # 開発
@@ -93,16 +93,16 @@ setup:
 	pip install -r requirements.txt
 
 test:
-	docker-compose exec dev pytest tests/ -v
+	docker compose exec dev pytest tests/ -v
 
 test-nlp:
-	docker-compose exec dev pytest tests/test_nlp/ -v
+	docker compose exec dev pytest tests/test_nlp/ -v
 
 test-topic:
-	docker-compose exec dev pytest tests/test_nlp/test_topic.py -v
+	docker compose exec dev pytest tests/test_nlp/test_topic.py -v
 
 test-ts:
-	docker-compose exec dev pytest tests/test_timeseries/ -v
+	docker compose exec dev pytest tests/test_timeseries/ -v
 
 lint:
 	flake8 src/ --max-line-length=100
@@ -122,31 +122,31 @@ clean:
 # 機械学習
 # ============================================================
 collect-data:
-	docker-compose exec dev python src/data/steam_collector.py
+	docker compose exec dev python src/data/steam_collector.py
 
 collect-10k:
-	docker-compose exec dev python scripts/collect/collect_dataset_10k.py
+	docker compose exec dev python scripts/collect/collect_dataset_10k.py
 
 collect-20k:
-	docker-compose exec dev python scripts/collect/collect_dataset_20k.py
+	docker compose exec dev python scripts/collect/collect_dataset_20k.py
 
 # Learning Curve実験（SIZES で比較サイズを指定可能。例: make learning-curve SIZES="10000 20000"）
 SIZES ?= 10000 20000
 learning-curve:
-	docker-compose exec dev python scripts/learning_curve/learning_curve_experiment.py --sizes $(SIZES)
+	docker compose exec dev python scripts/learning_curve/learning_curve_experiment.py --sizes $(SIZES)
 
 # Learning Curve結果分析・可視化
 analyze-curve:
-	docker-compose exec dev python scripts/learning_curve/analyze_learning_curve.py
+	docker compose exec dev python scripts/learning_curve/analyze_learning_curve.py
 
 # トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
 extract-topics:
-	docker-compose exec dev python scripts/nlp/extract_topics.py
+	docker compose exec dev python scripts/nlp/extract_topics.py
 
 # 感情分析モデル学習（vanilla base＝DAPT前のベースライン）
 # ⚠️ 警告: models/best_model_pre_dapt/ を上書きします
 train-sentiment:
-	docker-compose exec dev python scripts/nlp/train_sentiment.py \
+	docker compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/best_model_pre_dapt \
 		--seed 0 \
@@ -158,7 +158,7 @@ train-sentiment:
 # DAPT済みモデルをbaseに感情分析を微調整（③・本番モデル）
 # ⚠️ models/best_model/ を上書き。事前に models/dapt_distilbert/ が必要（python scripts/nlp/train_dapt.py）
 train-sentiment-dapt:
-	docker-compose exec dev python scripts/nlp/train_sentiment.py \
+	docker compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--base-model models/dapt_distilbert \
 		--output models/best_model \
@@ -174,35 +174,35 @@ train-sentiment-dapt:
 # ============================================================
 # OODテストセット収集（評価用・未知20ゲーム2000件）
 collect-ood:
-	docker-compose exec dev python scripts/collect/collect_ood_testset.py
+	docker compose exec dev python scripts/collect/collect_ood_testset.py
 
 # DAPT用の未ラベルコーパス収集（多様なゲーム10万件・OOD/学習ゲームは除外）
 collect-dapt-corpus:
-	docker-compose exec dev python scripts/collect/collect_dapt_corpus.py
+	docker compose exec dev python scripts/collect/collect_dapt_corpus.py
 
 # DAPT実行可能性の測定（GTX1060のメモリ・所要時間）
 dapt-feasibility:
-	docker-compose exec dev python scripts/benchmarks/dapt_feasibility.py
+	docker compose exec dev python scripts/benchmarks/dapt_feasibility.py
 
 # DAPT本体（MLM継続学習 → models/dapt_distilbert）
 train-dapt:
-	docker-compose exec dev python scripts/nlp/train_dapt.py
+	docker compose exec dev python scripts/nlp/train_dapt.py
 
 # OOD性能比較（デフォルト DAPT vs sst-2。3つ巴は --models で指定）
 compare-ood:
-	docker-compose exec dev python scripts/evaluation/compare_models_ood.py
+	docker compose exec dev python scripts/evaluation/compare_models_ood.py
 
 # 多シード検証（Issue #24・GPU長時間。SEEDSでシード数変更可）
 seed-study:
-	docker-compose exec dev python scripts/evaluation/seed_study.py --n-seeds $(or $(SEEDS),15)
+	docker compose exec dev python scripts/evaluation/seed_study.py --n-seeds $(or $(SEEDS),15)
 
 # 多シード検証の集計のみ（学習せず既存結果を分析）
 seed-study-analyze:
-	docker-compose exec dev python scripts/evaluation/seed_study.py --analyze-only
+	docker compose exec dev python scripts/evaluation/seed_study.py --analyze-only
 
 # テスト用学習（best_modelを上書きしない）
 train-test:
-	docker-compose exec dev python scripts/nlp/train_sentiment.py \
+	docker compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset data/train/reviews_10000.csv \
 		--output models/test_model \
 		--seed 0 \
@@ -214,7 +214,7 @@ train-test:
 # カスタム設定で学習（変数で設定を上書き可能）
 # 例: make train-custom DATASET=data/train/reviews_5000.csv LR=1e-5
 train-custom:
-	docker-compose exec dev python scripts/nlp/train_sentiment.py \
+	docker compose exec dev python scripts/nlp/train_sentiment.py \
 		--dataset $(DATASET) \
 		--output $(OUTPUT) \
 		--seed $(SEED) \
