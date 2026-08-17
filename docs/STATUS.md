@@ -15,7 +15,7 @@ Phase 7: 時系列予測 — ただし**着手前の準備段階**。既存デ�
 
 ## 次の一手（優先順）
 
-1. **Issue #31**（自然比率とレビュー密度の実測）。`query_summary` は既にAPIレスポンスに含まれ [steam_collector.py:246](https://github.com/rindguitar/game-demand-forecast/blob/main/src/data/steam_collector.py#L246) で捨てられているだけなので、追加のAPI呼び出しは不要
+1. **Issue #31**（自然比率とレビュー密度の実測）。`query_summary` は既にAPIレスポンスに含まれ [steam_collector.py:248](https://github.com/rindguitar/game-demand-forecast/blob/main/src/data/steam_collector.py#L248) で捨てられているだけなので、追加のAPI呼び出しは不要
 2. #31 の結果で Issue #32 の粒度（日次か週次か）・対象ゲーム数・遡る期間を確定させる
 3. Issue #32 実装（`steam_collector.py` に期間指定と自然比率の関数を追加 → `scripts/collect/` に実行スクリプト）
 
@@ -25,7 +25,7 @@ Phase 7: 時系列予測 — ただし**着手前の準備段階**。既存デ�
   - 密度不足: 5,605件 ÷ 86トピック ÷ 549日 = **1トピック1日あたり0.12件**。表のほとんどが0になる
   - 自然比率の欠如: `collect_balanced_reviews()` がPos/Negを50:50に強制しているため、ネガ側にしか出ないトピック（crashes等）が水増しされている。**件数を増やしても直らない**
   - 期間バラバラ: 件数固定で集めたため CS2は3日分・Stardew Valleyは190日分と、時間軸が揃っていない
-- Outlier率 43.2%（トピック分類不能）。時系列に使えるのは半分強になる → Issue #15 と関連
+- Outlier率 43.2%（トピック分類不能）。時系列に使えるのは半分強になる。Issue #15（トピック抽出の品質改善）はクローズ済みのため、Outlierを減らすか許容するかは Issue #32 の中で判断する
 - 「Steamの実レビューはポジティブが7〜9割」は一般知識であり**本プロジェクトでは未検証**。Issue #31 で実測する
 - Issue #30（多ゲーム・少レビュー）は時系列フェーズが一区切りしてから着手
 
