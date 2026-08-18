@@ -21,7 +21,11 @@
 
 ## 次の一手（優先順）
 
-1. **Issue #31**（自然比率とレビュー密度の実測）。`query_summary` は既にAPIレスポンスに含まれ [steam_collector.py:248](https://github.com/rindguitar/game-demand-forecast/blob/main/src/data/steam_collector.py#L248) で捨てられているだけなので、追加のAPI呼び出しは不要
+1. **Issue #31 (2) レビュー発生密度の実測を実装する**。設計は合意済み（issue本文の「決定事項」と decisions.md 参照）。ブランチ `feature/timeseries-feasibility` を切り、`scripts/benchmarks/timeseries_feasibility.py` を新規作成する
+   - 対象55本（学習7 + OOD20 + ランク帯30）／全ゲームは平均レート・4本のみ日次分布／フィルタ前後を両方記録
+   - **`get_steam_reviews()` は使わない**（フィルタ前の生件数が取れないため）。`request_with_backoff()` / `is_valid_english_review()` / `get_popular_games()` を部品として使う
+   - 検証は `--limit 3` の小規模実行 →  学習7ゲームの `pos_ratio` が既測定値（Stardew 98.8% / GTA V 83.7%）と一致するか突き合わせ
+   - なお #31 (1) 自然比率は学習7ゲーム分を測定済み（合計88.8%）。今回の実行で55本分に広がる
 2. #31 の結果で Issue #32 の粒度（日次か週次か）・対象ゲーム数・遡る期間を確定させる
 3. Issue #32 実装（`steam_collector.py` に期間指定と自然比率の関数を追加 → `scripts/collect/` に実行スクリプト）
 
@@ -52,3 +56,4 @@
 - 2026-08-18: 成果物は**株価チャート型**。Y軸は言及数（予測精度を検証できるようにするため）→ 同上
 - 2026-08-18: 充足度の配色は**オレンジ ↔ アクア**。赤↔緑は色覚多様性で識別不能のため却下 → 同上
 - 2026-08-18: **同接の定期記録を始める**（タグが粒度の橋渡しになるため、前回の「不要」判断を撤回）→ 同上
+- 2026-08-18: #31 の測定設計を確定（対象55本・平均レート＋4本のみ日次分布・フィルタ前後を記録）→ 同上
