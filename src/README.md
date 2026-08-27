@@ -16,6 +16,71 @@ src/
 
 ---
 
+## モジュールの繋がり
+
+**`src/` の中では、モジュール同士がひとつもimportし合っていません。**
+`src/` は独立した部品を並べた「部品箱」で、それを組み立てて処理にするのは `scripts/` 側の役割です。
+
+```mermaid
+flowchart LR
+    subgraph SCR["scripts/ — 組み立てる側"]
+        P1["collect/*.py"]
+        P2["nlp/train_sentiment.py"]
+        P3["nlp/extract_topics.py"]
+        P4["evaluation/*.py"]
+        P5["misclassification/*.py"]
+    end
+
+    subgraph SRC["src/ — 部品側"]
+        subgraph DATA["data/"]
+            SCOL["steam_collector.py"]
+            PREP["preprocessing.py"]
+            SPLT["dataset_split.py"]
+        end
+        subgraph NLPM["nlp/"]
+            MDL["model.py"]
+            TRN["train.py"]
+            DST["dataset.py"]
+            EVL["evaluation.py"]
+            SNT["sentiment.py"]
+            TPC["topic.py"]
+        end
+    end
+
+    P1 --> SCOL
+    P2 --> DST
+    P2 --> MDL
+    P2 --> TRN
+    P2 --> EVL
+    P3 --> TPC
+    P4 --> SCOL
+    P4 --> PREP
+    P4 --> SNT
+    P4 --> EVL
+    P4 --> DST
+    P4 --> MDL
+    P4 --> TRN
+    P5 --> DST
+    P5 --> MDL
+```
+
+この構造の意味は次の通りです。
+
+- **利点**: 部品を単体でテストしやすく、差し替えやすい。`src/nlp/model.py` を読むのに他のファイルを追う必要がない
+- **代償**: 処理の全体像は `src/` を読んでも分からない。「どういう順で呼ばれるか」は [../scripts/README.md](../scripts/README.md) の流れ図を見る必要がある
+
+### どこからも呼ばれていないモジュール
+
+図に線が繋がっていない、現状スクリプトから使われていないファイルです。
+
+| ファイル | 状態 |
+|---|---|
+| `data/dataset_split.py` | どのスクリプトからも呼ばれていない。`train_sentiment.py` は自前で `train_test_split` を呼んでいる |
+| `visualization/sentiment_plots.py` | どこからも呼ばれておらず、さらに冒頭で **存在しない `src/nlp/sentiment_db.py` をimportしている**ため、現状そのままでは実行できない |
+
+
+---
+
 ## data/ — データ収集・前処理
 
 | ファイル | 説明 |
@@ -73,3 +138,11 @@ NLPスコアと時系列予測を統合して需要スコアを算出するフ�
 | ファイル | 説明 |
 |---|---|
 | `sentiment_plots.py` | 感情分析結果のグラフ生成 |
+
+---
+
+## 関連
+
+- [../scripts/README.md](../scripts/README.md) — これらの部品を組み立てる実行スクリプトと、データの流れ
+- [../tests/README.md](../tests/README.md) — テストと対象モジュールの対応
+- [ドキュメントマップ](https://github.com/rindguitar/game-demand-forecast/wiki/Documentation-Map) — Wiki全体の繋がり
