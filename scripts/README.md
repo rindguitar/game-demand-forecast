@@ -19,68 +19,17 @@ scripts/
 
 ## 全体の流れ
 
-Steam APIから集めたCSVが、学習 → 評価 → 分析へ受け渡されていきます。
-スクリプト同士は**基本的にファイル（CSV/モデル）で繋がっており**、直接呼び合うのは点線の2箇所だけです。
+大きくは4段です。詳しい図は、それぞれのディレクトリの節にあります。
 
 ```mermaid
-flowchart TD
-    API(["Steam API"])
-
-    subgraph SC["collect/ — 収集"]
-        C10["collect_dataset_10k.py"]
-        COOD["collect_ood_testset.py"]
-        CDAPT["collect_dapt_corpus.py"]
-    end
-
-    subgraph SN["nlp/ — 学習・抽出"]
-        TD["train_dapt.py"]
-        TS["train_sentiment.py"]
-        ET["extract_topics.py"]
-    end
-
-    subgraph SEV["evaluation/ ・ learning_curve/ — 評価"]
-        CO["compare_models_ood.py"]
-        SS["seed_study.py"]
-        LC["learning_curve_experiment.py"]
-    end
-
-    API --> C10
-    API --> COOD
-    API --> CDAPT
-
-    C10 --> D10[("data/train/reviews_10000.csv")]
-    COOD --> DOOD[("data/test/reviews_ood_2000.csv")]
-    CDAPT --> DCO[("data/dapt/corpus.csv")]
-
-    DCO --> TD
-    TD --> MDAPT{{"models/dapt_distilbert"}}
-
-    D10 --> TS
-    MDAPT -. "--base-model" .-> TS
-    TS --> MBEST{{"models/best_model"}}
-
-    D10 --> ET
-    ET --> DTOP[("reviews_10000_with_topics.csv")]
-
-    DOOD --> CO
-    MBEST --> CO
-    CO --> DBM[("data/experiments/ood_benchmark/")]
-
-    SS -. "train_sentiment&#40;&#41; を import" .-> TS
-    LC -. "train_sentiment&#40;&#41; を import" .-> TS
-    SS --> DSS[("data/experiments/seed_study/results.csv")]
-    LC --> DLC[("data/experiments/learning_curve/results.csv")]
+flowchart LR
+    A["collect/<br/>Steam APIから集める"] --> B["nlp/<br/>学習・トピック抽出"]
+    B --> C["evaluation/<br/>精度を測る"]
+    C --> D["misclassification/<br/>間違いを分析する"]
 ```
 
-| 図形 | 意味 |
-|---|---|
-| 四角 | スクリプト |
-| 円筒 | データ（CSV） |
-| 六角形 | モデル（ディレクトリ） |
-| 点線 | ファイルを介さず、Pythonの関数として直接呼んでいる関係 |
-
-DAPTパイプラインを順に回す場合は `collect-dapt-corpus` → `train-dapt` → `train-sentiment-dapt` → `compare-ood` の順です。
-
+図の中の図形は共通で、**四角＝スクリプト / 円筒＝データ（CSV） / 六角形＝モデル** です。
+矢印は「この出力が次の入力になる」という流れを表します。
 
 ---
 
@@ -88,6 +37,13 @@ DAPTパイプラインを順に回す場合は `collect-dapt-corpus` → `train-
 
 Steam APIからレビューデータを収集するスクリプト。  
 収集したデータは `data/train/` に保存されます。
+
+```mermaid
+flowchart LR
+    API(["Steam API"]) --> C1["collect_dataset_10k.py"] --> D1[("data/train/reviews_10000.csv")]
+    API --> C2["collect_ood_testset.py"] --> D2[("data/test/reviews_ood_2000.csv")]
+    API --> C3["collect_dapt_corpus.py"] --> D3[("data/dapt/corpus.csv")]
+```
 
 | ファイル | 説明 |
 |---|---|
@@ -109,6 +65,25 @@ make collect-dapt-corpus   # DAPT用コーパス（10万件・未ラベル）
 
 感情分析モデルの学習とトピック抽出の本番実行スクリプト。  
 通常は `make` コマンド経由で実行します。
+
+**感情分析モデルができるまで**（左から順に実行する）
+
+```mermaid
+flowchart LR
+    D3[("data/dapt/corpus.csv")] --> T1["train_dapt.py"] --> M1{{"models/dapt_distilbert"}}
+    M1 --> T2["train_sentiment.py"] --> M2{{"models/best_model"}}
+    D1[("data/train/reviews_10000.csv")] --> T2
+```
+
+`train_dapt.py` が作るのは「Steamの言い回しに慣れただけ」のモデルで、まだ感情は判定できません。
+それを土台に `train_sentiment.py` で微調整して、本番モデル `models/best_model` になります。
+
+**トピック抽出**（上とは独立に動く）
+
+```mermaid
+flowchart LR
+    D1b[("data/train/reviews_10000.csv")] --> T3["extract_topics.py"] --> D4[("reviews_10000_with_topics.csv")]
+```
 
 | ファイル | 説明 |
 |---|---|
@@ -141,43 +116,38 @@ make extract-topics        # トピック抽出
 | `explain_misclassified.py` | 誤分類の解釈（Layer Integrated Gradientsで寄与語抽出・`--input`/`--model`） |
 | `plot_dapt_diff.py` | DAPT前後の誤分類差分を可視化（fixed/broke・タグ別） |
 
-### 実行順序
+### 手順1: 2つのモデルの誤分類を取り、差分を出す
 
-`analyze_misclassified.py` を**2回**（DAPT前モデル・DAPT後モデル）走らせ、その差分を追っていく流れです。
-表だけでは、どのCSVがどのスクリプトの入力になるかが読み取れないため図にしています。
+同じ `analyze_misclassified.py` を、DAPT前とDAPT後で**2回**走らせます。
 
 ```mermaid
 flowchart LR
-    OOD[("reviews_ood_2000.csv")]
-    MPRE{{"best_model_pre_dapt<br/>DAPT前"}}
-    MPOST{{"best_model<br/>DAPT後"}}
-
-    OOD --> A1["analyze_misclassified.py<br/>（1回目）"]
-    MPRE --> A1
-    OOD --> A2["analyze_misclassified.py<br/>（2回目）"]
-    MPOST --> A2
-
-    A1 --> M1[("misclassified_best_model_pre_dapt.csv")]
-    A2 --> M2[("misclassified_best_model.csv")]
-
-    M1 -- "--before" --> DF["diff_misclassified.py"]
-    M2 -- "--after" --> DF
-    DF --> FB[("fixed.csv / broke.csv")]
-
-    FB --> CAT["categorize_misclassified.py"]
-    CAT --> TG[("fixed_tagged.csv<br/>broke_tagged.csv")]
-
-    FB --> PL["plot_dapt_diff.py"]
-    TG --> PL
-    PL --> PNG[("dapt_diff_errortype.png<br/>dapt_diff_tags.png")]
-
-    M2 --> EXP["explain_misclassified.py"]
-    EXP --> TOK[("token_scores.csv<br/>top_words.csv<br/>summary.json")]
+    M1{{"best_model_pre_dapt<br/>DAPT前"}} --> A1["analyze_misclassified.py<br/>1回目"] --> C1[("misclassified_best_model_pre_dapt.csv")]
+    M2{{"best_model<br/>DAPT後"}} --> A2["analyze_misclassified.py<br/>2回目"] --> C2[("misclassified_best_model.csv")]
+    C1 --> DF["diff_misclassified.py"] --> FB[("fixed.csv / broke.csv")]
+    C2 --> DF
 ```
 
+2回とも入力データは同じ `data/test/reviews_ood_2000.csv` です（線が増えて読みにくくなるため図では省略）。
 `fixed` は「DAPT後に直ったレビュー」、`broke` は「DAPT後に壊れたレビュー」です。
-`plot_dapt_diff.py` は fixed/broke の**素のCSVとタグ付きCSVの両方**を読むため、`categorize_misclassified.py` を先に通しておく必要があります。
 
+### 手順2: 差分を分析する
+
+```mermaid
+flowchart LR
+    FB[("fixed.csv / broke.csv")] --> CAT["categorize_misclassified.py"] --> TG[("fixed_tagged.csv<br/>broke_tagged.csv")]
+    TG --> PL["plot_dapt_diff.py"] --> PNG[("dapt_diff_errortype.png<br/>dapt_diff_tags.png")]
+```
+
+`plot_dapt_diff.py` はタグ付きCSVだけでなく、素の `fixed.csv` / `broke.csv` も読みます。
+そのため `categorize_misclassified.py` を先に通しておく必要があります。
+
+### 手順3: なぜ間違えたかを調べる（手順2とは独立）
+
+```mermaid
+flowchart LR
+    C2b[("misclassified_best_model.csv")] --> EX["explain_misclassified.py"] --> TK[("token_scores.csv<br/>top_words.csv<br/>summary.json")]
+```
 
 ---
 
@@ -188,6 +158,22 @@ flowchart LR
 | `compare_models_ood.py` | 複数モデルのOOD性能比較（accuracy/P/R/F1・McNemar） |
 | `seed_study.py` | 多シードでDAPT効果を検証（Issue#24・平均±SD＋ペア検定・代表モデル選定） |
 | `validate_sentiment_english.py` | 英語100件での感情分析精度検証 |
+
+```mermaid
+flowchart LR
+    M2{{"models/best_model"}} --> E1["compare_models_ood.py"] --> O1[("data/experiments/ood_benchmark/<br/>metrics.json・比較グラフ")]
+    D2[("data/test/reviews_ood_2000.csv")] --> E1
+```
+
+`seed_study.py` と `learning_curve_experiment.py` だけは、CSVを介さず
+`train_sentiment.py` の関数を**直接呼んで**何度も学習を回します。
+
+```mermaid
+flowchart LR
+    S["seed_study.py<br/>シードを変えて15回"] --> TS["train_sentiment.py<br/>を関数として呼ぶ"]
+    L["learning_curve_experiment.py<br/>データ量を変えて複数回"] --> TS
+    TS --> R[("それぞれの results.csv")]
+```
 
 **使用方法:**
 ```bash

@@ -14,48 +14,31 @@ tests/
 
 ## テストと対象モジュールの対応
 
-テストファイルは `src/` のモジュールと1対1ではなく、`steam_collector.py` だけ2本のテストが当たっています。
-また、実際にSteam APIを叩くテストが2本あります（下図の点線）。
+テストは `src/` のモジュールと1対1ではなく、`steam_collector.py` にだけ2本のテストが当たっています。
+
+**test_data/ — データ収集・前処理**
 
 ```mermaid
 flowchart LR
-    subgraph T["tests/"]
-        subgraph TDATA["test_data/"]
-            T1["test_steam_collector.py"]
-            T2["test_filtering.py"]
-            T3["test_preprocessing.py"]
-        end
-        subgraph TNLP["test_nlp/"]
-            T4["test_sentiment.py"]
-            T5["test_evaluation.py"]
-            T6["test_topic.py"]
-        end
-    end
+    T1["test_steam_collector.py"] --> M1["src/data/steam_collector.py"]
+    T2["test_filtering.py"] --> M1
+    T3["test_preprocessing.py"] --> M2["src/data/preprocessing.py"]
+```
 
-    subgraph S["src/"]
-        M1["data/steam_collector.py"]
-        M2["data/preprocessing.py"]
-        M3["nlp/sentiment.py"]
-        M4["nlp/evaluation.py"]
-        M5["nlp/topic.py"]
-    end
+`test_steam_collector.py` と `test_filtering.py` は実際にSteam APIへ通信します。実行には `.env` のAPIキー設定が必要です。
 
-    API(["Steam API<br/>.env のAPIキーが必要"])
+**test_nlp/ — NLP処理**
 
-    T1 --> M1
-    T2 --> M1
-    T3 --> M2
-    T4 --> M3
-    T5 --> M4
-    T6 --> M5
-
-    T1 -. "実通信" .-> API
-    T2 -. "実通信" .-> API
+```mermaid
+flowchart LR
+    T4["test_sentiment.py"] --> M3["src/nlp/sentiment.py"]
+    T5["test_evaluation.py"] --> M4["src/nlp/evaluation.py"]
+    T6["test_topic.py"] --> M5["src/nlp/topic.py"]
 ```
 
 ### テストが無いモジュール
 
-上図の `src/` 側に出てこないファイルです。学習まわりの中核（モデル定義・学習ループ）が未カバーになっています。
+上の図の右側に出てこないファイルです。学習まわりの中核（モデル定義・学習ループ）が未カバーになっています。
 
 | モジュール | 備考 |
 |---|---|
@@ -64,7 +47,6 @@ flowchart LR
 | `src/nlp/dataset.py` | Dataset / DataLoader 作成 |
 | `src/data/dataset_split.py` | そもそもどのスクリプトからも呼ばれていない |
 | `src/visualization/sentiment_plots.py` | 存在しないモジュールをimportしており、現状実行できない |
-
 
 ---
 
