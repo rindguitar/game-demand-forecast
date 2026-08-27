@@ -92,6 +92,7 @@ makeコマンドを優先（直接 `docker compose` 等を叩かない）。
 | `docs/STATUS.md` | 現在地・次の一手 | **毎セッション開始時（必須）** |
 | `docs/decisions.md` | 技術選定・設計判断の記録（ADR） | 設計変更を検討するとき |
 | `docs/claude-code-starter-kit.md` | 運用ノウハウ・プロンプト集 | 運用を見直すとき |
+| `docs/mermaid-guide.md` | Mermaid図の作成手順・原則 | READMEやWikiに図を追加・更新するとき |
 | `.claude/rules/*.md` | トピック別の詳細規約 | 該当ファイルを触るとき（自動ロード） |
 | `scripts/README.md` | scripts配下の構成・各スクリプトの用途 | スクリプトを触るとき |
 | GitHub Wiki | 技術解説・分析レポート（[wiki](https://github.com/rindguitar/game-demand-forecast/wiki)） | 用語・背景を確認するとき |
