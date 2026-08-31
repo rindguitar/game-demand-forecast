@@ -70,16 +70,17 @@ def request_with_backoff(
 
 def get_popular_games(n_pages: int = 20) -> list:
     """
-    Steam公式の検索APIからレビュー数順の人気ゲームを取得（レビューが豊富な母集団）
+    Steam公式の検索APIから売上上位のゲームを取得（レビューが豊富な母集団）
 
     Steam公式の検索結果JSONはappidを直接持たず、ロゴ画像URLに埋め込まれているため、
-    正規表現で抽出する。
+    正規表現で抽出する。未発売タイトル等レビュー0件のゲームも含むので、必要なら
+    呼び出し側でレビュー数の下限を確認すること。
 
     Args:
         n_pages: 取得ページ数（1ページ約25件、20ページで約500件）
 
     Returns:
-        (app_id, game_name)のリスト（レビュー数の多い順）
+        (app_id, game_name)のリスト（売上上位順）
     """
     base_url = "https://store.steampowered.com/search/results/"
 
@@ -91,7 +92,9 @@ def get_popular_games(n_pages: int = 20) -> list:
             'query': '',
             'start': page * 25,
             'count': 25,
-            'sort_by': 'Reviews_DESC',  # レビュー数の多い順
+            # 売上上位（＝レビューが多く集まる）。sort_by='Reviews_DESC' は
+            # レビュー「数」ではなく「評価スコア」順なので使わない
+            'filter': 'globaltopsellers',
             'category1': 998,           # 998 = ゲームのみ（DLC・ツール等を除外）
             'json': 1,
         }

@@ -51,7 +51,7 @@ def build_target_games(pages: int, band_size: int) -> list:
     測定対象を組み立てる。
 
     学習7とOOD20だけでは全てレビューが豊富なゲームに偏り、密度が上限寄りに出る。
-    人気度による幅を見るため、レビュー数順の母集団から上位/中位/下位を足す。
+    規模による幅を見るため、売上上位の母集団から先頭/中間/末尾を足す。
     """
     games, seen = [], set()
 
@@ -66,7 +66,7 @@ def build_target_games(pages: int, band_size: int) -> list:
     add(load_games_from_csv(TRAIN_CSV), 'train7')
     add(load_games_from_csv(OOD_CSV), 'ood20')
 
-    # 2. レビュー数順の母集団から3つの帯を抜く
+    # 2. 売上上位の母集団から3つの帯を抜く
     popular = get_popular_games(n_pages=pages)
     mid_start = (len(popular) - band_size) // 2
     add(popular[:band_size], 'top')
@@ -247,9 +247,8 @@ def stratify_by_reviews(rate_rows: list, thresholds: list, outlier_rate: float,
     """
     累計レビュー数で層別し、層ごとに必要ゲーム数を試算する。
 
-    rank_band で層別しないのは、`get_popular_games()` がレビュー数順を返さないため
-    （2026-08-31 の実測で確認。上位帯に累計47件のゲームが混入し、中位<下位の逆転もあった）。
-    実測した total_reviews で分けるほうが確実。
+    rank_band で層別しないのは、帯が検索結果の並び順でしかなく、レビュー数の多寡を
+    表さないため。レートはゲームの規模で桁が変わるので、実測した total_reviews で分ける。
     """
     out = []
     for threshold in thresholds:
@@ -523,10 +522,11 @@ def write_summary(args, started, games, rate_rows, daily_rows, med, est) -> None
         '',
         '## 注意',
         '',
-        '- **`rank_band` は信用できない**。`get_popular_games()` は `sort_by=Reviews_DESC` を'
-        '指定しているがレビュー数順を返しておらず（2026-08-31 実測。上位帯に累計47件のゲームが'
-        '混入し、中位<下位の逆転も発生）、帯は検索結果の並び順でしかない。層別には実測した'
-        '`total_reviews` を使うこと',
+        '- **`rank_band` はレビュー数の多寡を表さない**。帯は母集団の並び順でしかないので、'
+        '層別には実測した `total_reviews` を使うこと',
+        '- 2026-08-31 の測定は `get_popular_games()` の修正前（`sort_by=Reviews_DESC` ＝'
+        '評価スコア順）に取得したもの。同関数は売上上位（`filter=globaltopsellers`）を返すよう'
+        '修正済みのため、測り直すと母集団が変わり、レートは上振れする見込み',
         '- `stop_reason` が `max_raw` の行は、レートが「その値以上」であることを示す',
         '',
     ]
