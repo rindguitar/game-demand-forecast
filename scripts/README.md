@@ -217,6 +217,7 @@ GPU性能・ファインチューニング負荷・DAPTの実行可能性など�
 | `gpu_benchmark.py` | GPU性能計測 |
 | `benchmark_finetuning.py` | ファインチューニングのGPU負荷検証 |
 | `dapt_feasibility.py` | DAPT着手前の実行可能性（メモリ・所要時間）計測 |
+| `timeseries_feasibility.py` | 時系列予測着手前の実行可能性計測。レビュー発生密度・英語フィルタ通過率・自然ポジ率を実測し、集計粒度（日次/週次）と必要ゲーム数を試算（Issue #31） |
 
 ---
 
