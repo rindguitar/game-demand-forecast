@@ -98,7 +98,7 @@ make train-custom DATASET=data/train/reviews_5000.csv OUTPUT=models/my_model SEE
 
 ### DAPT（ドメイン適応事前学習）パイプライン
 
-未ラベルSteamレビューでDistilBERTをゲームドメインに適応させ、その上で感情分析を微調整する（未知ゲームでの精度向上を確認済み）。
+未ラベルSteamレビューでDistilBERTをゲームドメインに適応させ、その上で感情分析を微調整する。未知ゲーム（OOD）で既製sst-2を有意に上回る（87.4% vs 84.5%・p=0.0003）。自作vanillaに対しては15シード平均で +0.79pt。
 
 ```bash
 make collect-dapt-corpus   # 未ラベルコーパス収集（10万件・OOD/学習ゲーム除外）
