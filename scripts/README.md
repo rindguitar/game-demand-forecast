@@ -51,6 +51,7 @@ flowchart LR
 | `collect_dataset_20k.py` | 20000件のbalancedレビューを収集 |
 | `collect_ood_testset.py` | OOD評価用テストセット収集（未知20ゲーム・ジャンル/タグ偏り対策） |
 | `collect_dapt_corpus.py` | DAPT用の未ラベルコーパス収集（多様な10万件・OOD/学習ゲーム除外） |
+| `collect_timeseries_dataset.py` | 時系列予測用のレビュー収集（期間固定・自然比率・レビュー本文を保存）。Issue #32 |
 
 **使用方法:**
 ```bash

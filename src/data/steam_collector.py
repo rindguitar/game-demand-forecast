@@ -170,12 +170,77 @@ def is_valid_english_review(text: str, min_length: int = 20, lang_confidence: fl
     return True
 
 
+def get_review_summary(app_id: int, language: str = 'english',
+                       max_retries: int = 5) -> Dict:
+    """
+    ゲームのレビュー要約（総数・ポジ/ネガ内訳）を1リクエストで取得
+
+    APIはレビュー本体と一緒に query_summary を返すが、get_steam_reviews() は
+    これを読み捨てている。件数だけ知りたい場合に本文まで取るのは無駄なので、
+    num_per_page=1 で要約だけ取る。
+
+    Args:
+        app_id: SteamゲームID
+        language: 'english', 'japanese', 'all'のいずれか
+        max_retries: API retry試行回数の上限
+
+    Returns:
+        total_reviews / total_positive / total_negative / review_score 等を含むdict
+        （取得失敗時は空dict）
+
+    Note:
+        件数はSteam API側のフィルタに基づく集計であり、is_valid_english_review()
+        を通す前の数字。実際に使える件数はこれより少ない（実測で中央値65%）。
+    """
+    params = {
+        'json': 1,
+        'language': language,
+        'filter': 'recent',
+        'review_type': 'all',
+        'purchase_type': 'all',
+        'num_per_page': 1,
+        'cursor': '*',
+    }
+    response = request_with_backoff(
+        f"https://store.steampowered.com/appreviews/{app_id}",
+        params=params, headers=HEADERS, timeout=20, max_retries=max_retries
+    )
+    data = response.json()
+    if data.get('success') != 1:
+        return {}
+    return data.get('query_summary', {})
+
+
+def _extract_detail_fields(review: Dict) -> Dict:
+    """
+    需要スコアの材料になる追加フィールドを取り出す
+
+    プレイ時間は意見の信頼度の材料に使う（需要の強さの重みには使わない。
+    離脱者の声が消えるため。詳細は docs/decisions.md）。
+    """
+    author = review.get('author', {})
+    return {
+        'playtime_at_review': author.get('playtime_at_review', 0),
+        'playtime_forever': author.get('playtime_forever', 0),
+        'playtime_last_two_weeks': author.get('playtime_last_two_weeks', 0),
+        'steam_purchase': review.get('steam_purchase', False),
+        'received_for_free': review.get('received_for_free', False),
+        'refunded': review.get('refunded', False),
+        'written_during_early_access': review.get('written_during_early_access', False),
+        'weighted_vote_score': review.get('weighted_vote_score', 0),
+        'comment_count': review.get('comment_count', 0),
+        'timestamp_updated': review.get('timestamp_updated', 0),
+    }
+
+
 def get_steam_reviews(
     app_id: int,
     language: str = 'english',
     review_type: str = 'all',
     num: int = 100,
-    max_retries: int = 5
+    max_retries: int = 5,
+    since_ts: int = 0,
+    detailed: bool = False
 ) -> List[Dict]:
     """
     Steam APIからレビューを収集
@@ -184,8 +249,11 @@ def get_steam_reviews(
         app_id: SteamゲームID（例: 730=CS:GO, 570=Dota 2）
         language: 'english', 'japanese', 'all'のいずれか
         review_type: 'positive', 'negative', 'all'のいずれか
-        num: 収集するレビュー数
+        num: 収集するレビュー数（since_ts併用時は上限として働く）
         max_retries: API retry試行回数の上限
+        since_ts: 指定するとこのUnix時刻より古いレビューに到達した時点で打ち切る。
+            件数ではなく期間で区切りたい時系列用（0=期間で区切らない）
+        detailed: Trueならプレイ時間・購入経路・返金有無などの追加フィールドも返す
 
     Returns:
         レビューのdictリスト、各dictは以下を含む:
@@ -195,6 +263,10 @@ def get_steam_reviews(
             - language: レビューの言語
             - timestamp_created: レビュー作成時刻
             - author: 投稿者のSteam ID
+        detailed=Trueの場合はさらに playtime_at_review / playtime_forever /
+        playtime_last_two_weeks / steam_purchase / received_for_free / refunded /
+        written_during_early_access / weighted_vote_score / comment_count /
+        timestamp_updated を含む
 
     Raises:
         ValueError: app_idまたはパラメータが不正な場合
@@ -252,8 +324,16 @@ def get_steam_reviews(
         if not api_reviews:
             break  # これ以上レビューなし
 
+        reached_cutoff = False
         for review in api_reviews:
             if len(reviews) >= num:
+                break
+
+            # 期間指定時は、指定日時より古いレビューに到達したら打ち切る
+            # （filter=recent で新しい順に返るため、以降はすべて範囲外）
+            created = review.get('timestamp_created', 0)
+            if since_ts and created < since_ts:
+                reached_cutoff = True
                 break
 
             review_text = review.get('review', '')
@@ -262,14 +342,20 @@ def get_steam_reviews(
             if not is_valid_english_review(review_text):
                 continue
 
-            reviews.append({
+            record = {
                 'review_text': review_text,
                 'voted_up': review.get('voted_up', False),
                 'votes_up': review.get('votes_up', 0),
                 'language': review.get('language', ''),
-                'timestamp_created': review.get('timestamp_created', 0),
+                'timestamp_created': created,
                 'author': review.get('author', {}).get('steamid', ''),
-            })
+            }
+            if detailed:
+                record.update(_extract_detail_fields(review))
+            reviews.append(record)
+
+        if reached_cutoff:
+            break
 
         # 次のcursorを取得
         cursor = data.get('cursor')
@@ -324,3 +410,49 @@ def collect_balanced_reviews(
         'positive': positive_reviews,
         'negative': negative_reviews
     }
+
+
+def collect_natural_reviews(
+    app_id: int,
+    since_ts: int,
+    language: str = 'english',
+    max_reviews: int = 200000,
+    max_retries: int = 5
+) -> List[Dict]:
+    """
+    指定期間のレビューを自然比率のまま収集（時系列用）
+
+    collect_balanced_reviews() との違いは2点。感情分析の学習用と時系列の測定用で、
+    必要なデータの性質が正反対なため別関数にしている（詳細は Wiki「学習用データと
+    測定用データの違い」）。
+
+    - ポジ/ネガを均衡させない。review_type='all' で1回だけ呼び、元の比率を保つ
+    - 件数ではなく期間で区切る。件数固定だとゲームごとに集まる期間がバラバラになる
+
+    Args:
+        app_id: SteamゲームID
+        since_ts: この Unix時刻以降のレビューを集める
+        language: 'english', 'japanese', 'all'のいずれか
+        max_reviews: 安全弁としての上限件数（期間で足りるはずだが暴走を防ぐ）
+        max_retries: API retry試行回数の上限
+
+    Returns:
+        レビューのdictリスト（プレイ時間・購入経路等の追加フィールドを含む）
+
+    Example:
+        >>> import time
+        >>> since = int(time.time()) - 3 * 365 * 86400  # 直近3年
+        >>> reviews = collect_natural_reviews(app_id=413150, since_ts=since)
+    """
+    if since_ts <= 0:
+        raise ValueError(f"Invalid since_ts: {since_ts}. Must be a positive Unix timestamp")
+
+    return get_steam_reviews(
+        app_id=app_id,
+        language=language,
+        review_type='all',
+        num=max_reviews,
+        max_retries=max_retries,
+        since_ts=since_ts,
+        detailed=True,
+    )
