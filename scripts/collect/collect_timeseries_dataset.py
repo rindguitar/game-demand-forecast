@@ -160,8 +160,9 @@ def main():
     parser.add_argument('--n-tags', type=int, default=6, help='タグ重なり判定で見る上位タグ数')
     parser.add_argument('--tag-overlap-threshold', type=int, default=2,
                         help='この数以上タグが共通したら「似たゲーム」として弾く')
-    parser.add_argument('--max-reviews-per-game', type=int, default=200000,
-                        help='1ゲームあたりの安全弁（期間で足りるはずだが暴走を防ぐ）')
+    parser.add_argument('--max-reviews-per-game', type=int, default=400000,
+                        help='1ゲームあたりの安全弁。#31の実測最大 234件/日 × 3年 = 約26万件'
+                             'なので余裕を持たせている。当たると期間を全部カバーできない')
     parser.add_argument('--seed', type=int, default=42, help='ゲーム選定のランダムシード')
     parser.add_argument('--sleep', type=float, default=0.5, help='リクエスト間の待機秒数')
     parser.add_argument('--output', default='data/timeseries/reviews_timeseries.csv')
@@ -200,6 +201,7 @@ def main():
     # 4. ゲームごとに期間指定で収集し、1本ずつ追記する
     print(f'\n[2/2] レビュー収集（{len(games)}ゲーム）')
     total_rows = 0
+    truncated_games = []
     for i, game in enumerate(games, 1):
         app_id, name = game['app_id'], game['name']
         try:
@@ -215,15 +217,31 @@ def main():
         append_rows(args.output, rows)
         total_rows += len(rows)
 
+        # 上限で打ち切られたゲームは期間を全部カバーできず、直近だけに存在する
+        # ことになる。合算すると偽の成長を作る側に回るので警告する
+        oldest = min((r['timestamp_created'] for r in reviews), default=0)
+        truncated = len(reviews) >= args.max_reviews_per_game
         pos = sum(1 for r in reviews if r['voted_up'])
         ratio = pos / len(reviews) if reviews else 0
+        covered = (oldest - since_ts) / 86400 if oldest else 0
+        note = ''
+        if truncated:
+            note = f'  ⚠️ 上限で打ち切り（{covered:.0f}日分不足）'
+            truncated_games.append(name)
         print(f"  [{i:2d}/{len(games)}] {name[:30]:30s} {len(rows):>6,d}件  "
-              f"ポジ率{ratio:>5.1%}  （累計 {total_rows:,}件）")
+              f"ポジ率{ratio:>5.1%}  （累計 {total_rows:,}件）{note}")
         time.sleep(args.sleep)
 
     print(f'\n✓ 完了: {total_rows:,}件 → {args.output}')
     print('  ポジ率が実態（学習7ゲームで88.8%前後）に近ければ、自然比率のまま'
           '集められている')
+    if truncated_games:
+        print(f'\n⚠️ {len(truncated_games)}本が上限で打ち切られ、期間を全部カバーできていない:')
+        for name in truncated_games:
+            print(f'    - {name}')
+        print('  これらは直近だけに存在するため、合算すると偽の成長を作る。')
+        print('  --max-reviews-per-game を上げて再収集するか、分析時に除外すること。')
+    print(f'\n次: python scripts/collect/inspect_timeseries_dataset.py で偏りを点検する')
 
 
 if __name__ == '__main__':
