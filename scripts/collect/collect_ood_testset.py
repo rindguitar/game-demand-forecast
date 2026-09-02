@@ -84,10 +84,18 @@ def get_game_genres(app_id: int) -> frozenset:
     data = response.json()
 
     entry = data.get(str(app_id), {})
-    if not entry.get('success'):
+    if not isinstance(entry, dict) or not entry.get('success'):
         return frozenset()
-    genres = entry.get('data', {}).get('genres', [])
-    return frozenset(g['description'] for g in genres)
+
+    # ジャンル情報を持たないタイトル（未発売等）では data が [] で返るため、
+    # dictであることを確認してから読む
+    detail = entry.get('data', {})
+    if not isinstance(detail, dict):
+        return frozenset()
+
+    genres = detail.get('genres', [])
+    return frozenset(g['description'] for g in genres
+                     if isinstance(g, dict) and 'description' in g)
 
 
 def get_game_tags(app_id: int, n_tags: int = 6) -> list:
