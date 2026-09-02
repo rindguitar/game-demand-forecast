@@ -72,6 +72,19 @@ def append_rows(path: str, rows: list) -> None:
         writer.writerows(rows)
 
 
+GAME_FIELDS = ['app_id', 'name', 'genres', 'tags', 'total_reviews',
+               'total_positive', 'total_negative']
+
+
+def save_game_master(path: str, games: list) -> None:
+    """選んだゲームの台帳を保存する（ジャンル・タグ・累計レビュー数）"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=GAME_FIELDS)
+        writer.writeheader()
+        writer.writerows(games)
+
+
 def select_games(args, already: set) -> list:
     """
     収集対象のゲームを選ぶ。
@@ -109,10 +122,19 @@ def select_games(args, already: set) -> list:
 
         # 3. タグ重なりで「似たゲーム」を弾く（粗いジャンルが取りこぼす被りを検出）
         tags = set(get_game_tags(app_id, args.n_tags)) - TAG_NOISE
-        if any(len(tags & prev) >= args.tag_overlap_threshold for _, _, prev in selected):
+        if any(len(tags & set(g['tags'].split('|'))) >= args.tag_overlap_threshold
+               for g in selected):
             continue
 
-        selected.append((app_id, name, tags))
+        selected.append({
+            'app_id': app_id,
+            'name': name,
+            'genres': '|'.join(sorted(genres)),
+            'tags': '|'.join(sorted(tags)),
+            'total_reviews': total,
+            'total_positive': summary.get('total_positive', 0),
+            'total_negative': summary.get('total_negative', 0),
+        })
         profile_counts[genres] = profile_counts.get(genres, 0) + 1
         for g in genres:
             genre_counts[g] = genre_counts.get(g, 0) + 1
@@ -143,6 +165,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='ゲーム選定のランダムシード')
     parser.add_argument('--sleep', type=float, default=0.5, help='リクエスト間の待機秒数')
     parser.add_argument('--output', default='data/timeseries/reviews_timeseries.csv')
+    parser.add_argument('--games-output', default='data/timeseries/games.csv',
+                        help='選んだゲームの台帳（ジャンル・タグ・累計レビュー数）')
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
@@ -168,10 +192,16 @@ def main():
         print('  条件を満たすゲームが見つかりませんでした')
         return
 
-    # 3. ゲームごとに期間指定で収集し、1本ずつ追記する
+    # 3. ゲーム台帳を保存する。ジャンル・タグは選定時にしか手元に無いので、
+    #    ここで残さないと後から偏りを分析できない（再取得が必要になる）
+    save_game_master(args.games_output, games)
+    print(f'  台帳を保存: {args.games_output}')
+
+    # 4. ゲームごとに期間指定で収集し、1本ずつ追記する
     print(f'\n[2/2] レビュー収集（{len(games)}ゲーム）')
     total_rows = 0
-    for i, (app_id, name, _tags) in enumerate(games, 1):
+    for i, game in enumerate(games, 1):
+        app_id, name = game['app_id'], game['name']
         try:
             reviews = collect_natural_reviews(
                 app_id=app_id, since_ts=since_ts,
