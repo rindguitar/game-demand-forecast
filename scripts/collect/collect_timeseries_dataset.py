@@ -133,7 +133,7 @@ def drop_game_rows(path: str, app_ids: set) -> int:
 
 
 def judge_coverage(reason: str, oldest: int, since_ts: int, release_date: str,
-                   slack_days: int = 30) -> str:
+                   slack_days: int = 7) -> str:
     """
     期間を全部カバーできたかを判定する
 
@@ -153,7 +153,9 @@ def judge_coverage(reason: str, oldest: int, since_ts: int, release_date: str,
                 tzinfo=dt.timezone.utc).timestamp()
         except ValueError:
             return 'unknown'
-        # 発売がウィンドウ内なら、それ以上古いレビューは存在しない＝取り切れている
+        # 発売がウィンドウ内なら、それ以上古いレビューは存在しない＝取り切れている。
+        # slackを詰めているのは、Early Accessのゲームが 1.0 の日付を返すため。
+        # 緩めるとEA期間ごと切れたデータを「取り切った」と誤判定する（実測: Hades II）
         return 'ok' if oldest <= released + slack_days * 86400 else 'partial'
     return 'partial'
 

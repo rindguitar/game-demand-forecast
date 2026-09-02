@@ -44,6 +44,15 @@ def test_exhausted_long_after_release_is_partial():
     assert judge_coverage(STOP_EXHAUSTED, ts('2025-07-23'), SINCE, '2015-05-29') == 'partial'
 
 
+def test_early_access_game_cut_after_release_is_partial():
+    """EA作品は appdetails が 1.0 の日付を返すため、1.0 直後で切れたら未達とする
+
+    Hades II は 1.0 が 2025-09-25 だがEAレビューは2024年からある。ここを 'ok' に
+    すると、EA期間ごと切れたデータが揃っているものとして混ざる。
+    """
+    assert judge_coverage(STOP_EXHAUSTED, ts('2025-10-15'), SINCE, '2025-09-25') == 'partial'
+
+
 def test_exhausted_without_release_date_is_unknown():
     """発売日が取れないと区別できないので、人が見る印を付ける"""
     assert judge_coverage(STOP_EXHAUSTED, ts('2025-07-23'), SINCE, '') == 'unknown'
