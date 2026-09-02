@@ -44,6 +44,12 @@ help:
 	@echo "  make train-prophet      - Prophet学習"
 	@echo "  make train-lstm         - LSTM学習"
 	@echo ""
+	@echo "【時系列予測パイプライン】"
+	@echo "  make timeseries-dataset   - 収集→偏り点検を通しで実行（1.5〜2時間）"
+	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
+	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
+	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
+	@echo ""
 	@echo "【DAPTパイプライン】"
 	@echo "  make collect-ood          - OODテストセット収集（評価用）"
 	@echo "  make collect-dapt-corpus  - DAPT用コーパス収集（10万件・未ラベル）"
@@ -167,6 +173,22 @@ train-sentiment-dapt:
 		--epochs 10 \
 		--lr 1e-5 \
 		--patience 3
+
+# ============================================================
+# 時系列予測パイプライン（Issue #32）
+#   collect-timeseries → inspect-timeseries → extract-topics → ...
+# ============================================================
+# 時系列用レビュー収集（期間固定・自然比率・3年×30本。1.5〜2時間）
+# 中断しても同じコマンドで再開できる（収集済みゲームは自動スキップ）
+collect-timeseries:
+	docker compose exec dev python scripts/collect/collect_timeseries_dataset.py $(COLLECT_ARGS)
+
+# 収集データの偏り点検（APIを叩かずCSVだけ読むので収集途中でも実行可）
+inspect-timeseries:
+	docker compose exec dev python scripts/collect/inspect_timeseries_dataset.py $(INSPECT_ARGS)
+
+# 収集 → 点検を通しで実行。収集が失敗したら点検はしない
+timeseries-dataset: collect-timeseries inspect-timeseries
 
 # ============================================================
 # DAPT（ドメイン適応事前学習）パイプライン
