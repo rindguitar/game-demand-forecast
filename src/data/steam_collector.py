@@ -7,7 +7,8 @@ Steam APIからゲームレビューを収集する機能を提供します。
 import requests
 import time
 import re
-from typing import List, Dict, Optional
+from datetime import datetime
+from typing import List, Dict, Optional, Tuple
 from langdetect import detect_langs, LangDetectException
 from langdetect import DetectorFactory
 DetectorFactory.seed = 0  # 再現性のために固定
@@ -211,6 +212,37 @@ def get_review_summary(app_id: int, language: str = 'english',
     return data.get('query_summary', {})
 
 
+def get_release_date(app_id: int, max_retries: int = 5) -> str:
+    """
+    ゲームの発売日を取得（YYYY-MM-DD、取得・解釈できなければ空文字）
+
+    収集が期間の途中で切れたのか、そもそも発売がその期間内なのかを区別するために使う。
+    区別できないと「直近しか無いゲーム」と「直近しか取れなかったゲーム」が混ざる。
+    """
+    url = "https://store.steampowered.com/api/appdetails"
+    params = {'appids': app_id, 'filters': 'release_date', 'l': 'english', 'cc': 'us'}
+    try:
+        response = request_with_backoff(url, params=params, headers=HEADERS,
+                                        timeout=20, max_retries=max_retries)
+        entry = response.json().get(str(app_id), {})
+    except (requests.exceptions.RequestException, ValueError):
+        return ''
+    if not isinstance(entry, dict) or not entry.get('success'):
+        return ''
+    detail = entry.get('data', {})
+    if not isinstance(detail, dict):
+        return ''
+
+    raw = (detail.get('release_date') or {}).get('date', '')
+    # Steamの表記ゆれ（"11 Sep, 2025" / "Sep 11, 2025" 等）に備えて複数書式を試す
+    for fmt in ('%d %b, %Y', '%b %d, %Y', '%d %B, %Y', '%B %d, %Y'):
+        try:
+            return datetime.strptime(raw, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return ''
+
+
 def _extract_detail_fields(review: Dict) -> Dict:
     """
     需要スコアの材料になる追加フィールドを取り出す
@@ -231,6 +263,114 @@ def _extract_detail_fields(review: Dict) -> Dict:
         'comment_count': review.get('comment_count', 0),
         'timestamp_updated': review.get('timestamp_updated', 0),
     }
+
+
+# 収集の停止理由。「期間の先頭まで遡れた」のか「途中で止められた」のかを
+# 呼び出し側が区別できないと、切れたデータが「それしか無かった」ものとして混ざる
+STOP_REACHED_SINCE = 'reached_since'   # 指定期間の先頭まで到達（正常）
+STOP_REACHED_NUM = 'reached_num'       # 件数上限に到達
+STOP_EXHAUSTED = 'exhausted'           # APIがこれ以上返さない
+STOP_ERROR = 'error'                   # リクエスト失敗が続いた
+
+
+def _collect_reviews_paged(
+    app_id: int,
+    params: Dict,
+    num: int,
+    since_ts: int,
+    detailed: bool,
+    max_retries: int,
+    empty_retries: int = 3,
+    sleep: float = 0.5,
+) -> Tuple[List[Dict], str]:
+    """
+    cursorページングでレビューを集め、「なぜ止まったか」も返す
+
+    Steamは連続アクセスに対し、エラーではなく**空ページ**を返して黙って打ち切る
+    ことがある。これを終端と解釈すると期間の途中で切れたデータが混ざるため
+    （実測で15本中6本が該当）、空ページは待って同じcursorでやり直す。
+
+    Args:
+        params: APIクエリパラメータ（cursorは本関数が書き換える）
+        empty_retries: 空ページを何回まで待ってやり直すか
+        sleep: ページ間の待機秒数
+
+    Returns:
+        (レビューのリスト, 停止理由)。停止理由は STOP_* のいずれか。
+        途中で失敗した場合も、取れた分は捨てずに返す
+    """
+    base_url = "https://store.steampowered.com/appreviews/"
+    page_size = params.get('num_per_page', 100)
+    reviews: List[Dict] = []
+    cursor = '*'
+    seen_cursors = set()
+    empty_streak = 0
+    last_page_size = 0
+
+    while len(reviews) < num:
+        params['cursor'] = cursor
+
+        # 1. 1ページ取得（429等は request_with_backoff 側でリトライ済み）
+        try:
+            response = request_with_backoff(
+                f"{base_url}{app_id}", params=params, timeout=10, max_retries=max_retries
+            )
+            data = response.json()
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            return reviews, f'{STOP_ERROR}: {exc}'
+
+        if data.get('success') != 1:
+            return reviews, f"{STOP_ERROR}: success={data.get('error', data.get('success'))}"
+
+        # 2. 空ページは、待って同じcursorをやり直す。
+        #    直前が満杯のページなら「まだ続きがあるのに空が返った」＝レート制限を疑い、
+        #    長めに粘る。直前が途中までのページなら本当の終端なので粘らない
+        api_reviews = data.get('reviews', [])
+        if not api_reviews:
+            empty_streak += 1
+            limit = empty_retries if last_page_size >= page_size else 1
+            if empty_streak > limit:
+                return reviews, STOP_EXHAUSTED
+            time.sleep(min(45.0, sleep * 10 * (3 ** (empty_streak - 1))))
+            continue
+        empty_streak = 0
+        last_page_size = len(api_reviews)
+
+        # 3. レビューを取り出す。filter=recent は新しい順なので、
+        #    since_ts より古いものが出た時点で以降はすべて範囲外
+        for review in api_reviews:
+            if len(reviews) >= num:
+                break
+
+            created = review.get('timestamp_created', 0)
+            if since_ts and created < since_ts:
+                return reviews, STOP_REACHED_SINCE
+
+            review_text = review.get('review', '')
+            if not is_valid_english_review(review_text):
+                continue
+
+            record = {
+                'review_text': review_text,
+                'voted_up': review.get('voted_up', False),
+                'votes_up': review.get('votes_up', 0),
+                'language': review.get('language', ''),
+                'timestamp_created': created,
+                'author': review.get('author', {}).get('steamid', ''),
+            }
+            if detailed:
+                record.update(_extract_detail_fields(review))
+            reviews.append(record)
+
+        # 4. 次のページへ。cursorが無い・同じcursorが返るのは終端
+        cursor = data.get('cursor')
+        if not cursor or cursor in seen_cursors:
+            return reviews, STOP_EXHAUSTED
+        seen_cursors.add(cursor)
+
+        time.sleep(sleep)  # Rate limiting: Steam APIを尊重
+
+    return reviews, STOP_REACHED_NUM
 
 
 def get_steam_reviews(
@@ -288,9 +428,6 @@ def get_steam_reviews(
     if num <= 0:
         raise ValueError(f"Invalid num: {num}. Must be positive")
 
-    # Steam APIエンドポイント
-    base_url = "https://store.steampowered.com/appreviews/"
-
     # APIパラメータ
     params = {
         'json': 1,
@@ -301,70 +438,14 @@ def get_steam_reviews(
         'num_per_page': min(100, num),  # APIの上限は1リクエスト100件
     }
 
-    reviews = []
-    cursor = '*'  # 初期cursor
-
-    while len(reviews) < num:
-        params['cursor'] = cursor
-
-        # retry付きAPIリクエスト（429レート制限は指数バックオフで待機）
-        response = request_with_backoff(
-            f"{base_url}{app_id}", params=params, timeout=10, max_retries=max_retries
-        )
-        data = response.json()
-
-        # APIレスポンス確認
-        if data.get('success') != 1:
-            raise requests.exceptions.RequestException(
-                f"Steam API returned error: {data.get('error', 'Unknown error')}"
-            )
-
-        # レビュー抽出
-        api_reviews = data.get('reviews', [])
-        if not api_reviews:
-            break  # これ以上レビューなし
-
-        reached_cutoff = False
-        for review in api_reviews:
-            if len(reviews) >= num:
-                break
-
-            # 期間指定時は、指定日時より古いレビューに到達したら打ち切る
-            # （filter=recent で新しい順に返るため、以降はすべて範囲外）
-            created = review.get('timestamp_created', 0)
-            if since_ts and created < since_ts:
-                reached_cutoff = True
-                break
-
-            review_text = review.get('review', '')
-
-            # 有効な英語レビューのみ収集
-            if not is_valid_english_review(review_text):
-                continue
-
-            record = {
-                'review_text': review_text,
-                'voted_up': review.get('voted_up', False),
-                'votes_up': review.get('votes_up', 0),
-                'language': review.get('language', ''),
-                'timestamp_created': created,
-                'author': review.get('author', {}).get('steamid', ''),
-            }
-            if detailed:
-                record.update(_extract_detail_fields(review))
-            reviews.append(record)
-
-        if reached_cutoff:
-            break
-
-        # 次のcursorを取得
-        cursor = data.get('cursor')
-        if not cursor:
-            break  # ページなし
-
-        # Rate limiting: Steam APIを尊重
-        time.sleep(0.5)
-
+    reviews, reason = _collect_reviews_paged(
+        app_id=app_id, params=params, num=num, since_ts=since_ts,
+        detailed=detailed, max_retries=max_retries,
+    )
+    # 従来の呼び出し側は例外を期待しているので、失敗時はここで投げ直す。
+    # 途中経過も含めて受け取りたい場合は _collect_reviews_paged() を直接使う
+    if reason.startswith(STOP_ERROR):
+        raise requests.exceptions.RequestException(f"Steam API error: {reason}")
     return reviews
 
 
@@ -417,8 +498,9 @@ def collect_natural_reviews(
     since_ts: int,
     language: str = 'english',
     max_reviews: int = 200000,
-    max_retries: int = 5
-) -> List[Dict]:
+    max_retries: int = 5,
+    sleep: float = 0.5,
+) -> Tuple[List[Dict], str]:
     """
     指定期間のレビューを自然比率のまま収集（時系列用）
 
@@ -437,22 +519,27 @@ def collect_natural_reviews(
         max_retries: API retry試行回数の上限
 
     Returns:
-        レビューのdictリスト（プレイ時間・購入経路等の追加フィールドを含む）
+        (レビューのリスト, 停止理由)。停止理由が STOP_REACHED_SINCE 以外の場合、
+        指定期間の先頭まで遡れていない（＝そのゲームは直近しか揃っていない）。
+        合算すると偽の成長を作るため、呼び出し側で必ず確認すること
 
     Example:
         >>> import time
         >>> since = int(time.time()) - 3 * 365 * 86400  # 直近3年
-        >>> reviews = collect_natural_reviews(app_id=413150, since_ts=since)
+        >>> reviews, reason = collect_natural_reviews(app_id=413150, since_ts=since)
     """
     if since_ts <= 0:
         raise ValueError(f"Invalid since_ts: {since_ts}. Must be a positive Unix timestamp")
 
-    return get_steam_reviews(
-        app_id=app_id,
-        language=language,
-        review_type='all',
-        num=max_reviews,
-        max_retries=max_retries,
-        since_ts=since_ts,
-        detailed=True,
+    params = {
+        'json': 1,
+        'language': language,
+        'filter': 'recent',
+        'review_type': 'all',
+        'purchase_type': 'all',
+        'num_per_page': 100,
+    }
+    return _collect_reviews_paged(
+        app_id=app_id, params=params, num=max_reviews, since_ts=since_ts,
+        detailed=True, max_retries=max_retries, sleep=sleep,
     )

@@ -47,16 +47,71 @@ def bar(ratio: float, width: int = 30) -> str:
     return '█' * int(ratio * width)
 
 
-def report_ratio(reviews: list) -> None:
-    """自然比率が保たれているかを見る"""
+def report_coverage(log_path: str) -> None:
+    """
+    期間を全部カバーできていないゲームが混ざっていないかを見る
+
+    ここが最優先。直近しか取れていないゲームを混ぜると、他の項目（ジャンル量・
+    参加ゲーム数の推移）が全部その形に引きずられ、点検自体が意味を失う。
+    """
+    print('\n## 0. 収集の網羅性')
+    if not os.path.exists(log_path):
+        print(f'  収集ログ（{log_path}）が無い。旧バージョンで集めたデータの可能性がある。')
+        print('  期間の途中で切れていても検出できないため、収集し直すこと')
+        return
+
+    with open(log_path, encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    bad = [r for r in rows if r.get('coverage') != 'ok']
+    print(f'  {len(rows)}ゲーム中 {len(rows) - len(bad)}本が期間を全部カバー')
+    if not bad:
+        print('  → 全ゲームで期間が揃っている')
+        return
+    for r in bad:
+        print(f"  ⚠️ {r['name'][:32]:32s} {r['coverage']:8s} 最古{r['oldest']} "
+              f"（{r['stop_reason'][:40]}）")
+    print('  → これらは直近だけに存在する。収集し直すまで、以降の項目は割り引いて読むこと')
+
+
+def report_ratio(reviews: list, games: dict) -> None:
+    """
+    自然比率が保たれているかを見る
+
+    比較先は固定値ではなく、集めたゲームのSteam公式ポジ率を収集件数で重み付けした
+    期待値。ポジ率は顔ぶれ次第で動く（炎上作が入れば下がる）ので、固定値と比べると
+    「収集方法の問題」と「ゲーム構成の問題」を取り違える。
+    """
     pos = sum(1 for r in reviews if str(r['voted_up']).lower() in ('true', '1'))
     ratio = pos / len(reviews)
     print('\n## 1. 自然比率')
     print(f'  ポジ {pos:,} / 全体 {len(reviews):,} = {ratio:.1%}')
-    if 0.80 <= ratio <= 0.95:
-        print('  → 実態（学習7ゲームで88.8%）に近い。均衡させずに集められている')
+
+    # 収集件数で重み付けした「Steam公式サマリ通りならこうなるはず」の値
+    counts = defaultdict(int)
+    for r in reviews:
+        counts[int(r['game_id'])] += 1
+    weighted, covered = 0.0, 0
+    for app_id, n in counts.items():
+        info = games.get(app_id)
+        if not info or not int(info.get('total_reviews') or 0):
+            continue
+        weighted += n * int(info['total_positive']) / int(info['total_reviews'])
+        covered += n
+    if not covered:
+        print('  ゲーム台帳が無いため期待値と比較できない')
+        return
+
+    expected = weighted / covered
+    gap = ratio - expected
+    print(f'  期待値 {expected:.1%}（各ゲームのSteam公式ポジ率を収集件数で重み付け）'
+          f'  乖離 {gap:+.1%}')
+    if abs(gap) <= 0.05:
+        print('  → 期待値どおり。均衡させずに集められている')
+        print('  ※ 期待値は全言語・全期間の集計なので、英語のみ・直近3年の実測が'
+              '数pt下振れるのは正常')
     else:
-        print('  → 実態(88.8%前後)から外れている。収集方法かゲーム構成を確認すること')
+        print('  → 期待値から外れている。収集方法を確認すること')
+        print('  ※ 期待値は全言語・全期間の集計。収集期間が短いほど差は出やすい')
 
 
 def report_game_concentration(reviews: list, top_n: int) -> None:
@@ -152,6 +207,8 @@ def main():
     parser = argparse.ArgumentParser(description='時系列用データセットの偏りを点検')
     parser.add_argument('--input', default='data/timeseries/reviews_timeseries.csv')
     parser.add_argument('--games', default='data/timeseries/games.csv')
+    parser.add_argument('--log', default='data/timeseries/collection_log.csv',
+                        help='収集ログ（期間を全部カバーできたかの記録）')
     parser.add_argument('--top-n', type=int, default=10, help='ゲーム別に表示する本数')
     parser.add_argument('--bucket-days', type=int, default=90,
                         help='参加ゲーム数を数える区切り日数')
@@ -173,7 +230,8 @@ def main():
     print(f'  {len(reviews):,}件 / {len({r["game_id"] for r in reviews})}ゲーム'
           f' / {lo} 〜 {hi}')
 
-    report_ratio(reviews)
+    report_coverage(args.log)
+    report_ratio(reviews, games)
     report_game_concentration(reviews, args.top_n)
     report_genre_divergence(reviews, games)
     report_roster_change(reviews, args.bucket_days)
