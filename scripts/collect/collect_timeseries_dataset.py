@@ -11,9 +11,11 @@
 「何が求められているか」の測定結果が収集方法の産物になってしまうこと。
 
 設計:
-- 母集団: get_popular_games()（売上上位＝レビューが豊富）
-- 採用条件: 累計レビュー数が閾値以上（実測で1万件未満は 2.12件/日まで落ちる）
-- ジャンル偏り対策: collect_ood_testset.py のジャンル判定・タグ重なり除外を流用
+- 母集団: get_popular_games()（売上上位＝レビューが豊富）→ メタ情報をキャッシュに集める
+- 採用条件: 累計レビュー数が閾値以上（実測で1万件未満は 2.12件/日まで落ちる）かつ
+  発売から1年以上（履歴が短すぎるゲームは時系列に寄与しない）
+- 選定は3つの条件を同時に満たす組を作る（詳細は select_from_pool()）
+  1. 各ジャンル最低3本  2. 土台は14本まで  3. タグが2個以上重なるゲームは入れない
 - 保存: ゲーム1本ごとに追記。中断しても再開できる
 - 網羅性: ゲーム別に「指定期間を全部カバーできたか」を collection_log.csv に記録する。
   再開時にスキップするのはカバーできたゲームだけで、途中で切れたものは収集し直す
@@ -28,10 +30,12 @@
 import os
 import sys
 import csv
+import json
 import time
 import random
 import argparse
 import datetime as dt
+from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -108,7 +112,13 @@ def load_collected_ids(path: str, log_path: str) -> set:
         return {app_id for app_id, r in log.items()
                 if r.get('coverage') == 'ok' and app_id in in_csv}
 
-    # ログが無い（旧バージョンで収集した）場合はCSVの有無だけで判断する
+    # ログが無い（旧バージョンで収集した）場合はCSVの有無だけで判断する。
+    # 期間を全部カバーできたかは分からないので、その旨を伝える
+    if in_csv:
+        print(f'⚠️ 収集ログ（{log_path}）が無いため、既存CSVの{len(in_csv)}ゲームは'
+              '網羅性を確認できません。')
+        print('   途中で切れていても「済み」として飛ばされます。'
+              '取り直す場合はCSVを削除してください')
     return in_csv
 
 
@@ -171,95 +181,219 @@ def append_rows(path: str, rows: list) -> None:
 
 
 GAME_FIELDS = ['app_id', 'name', 'genres', 'tags', 'total_reviews',
-               'total_positive', 'total_negative', 'release_date']
+               'total_positive', 'total_negative', 'release_date', 'tier']
 
 
 def save_game_master(path: str, games: list) -> None:
-    """選んだゲームの台帳を保存する（ジャンル・タグ・累計レビュー数）"""
+    """選んだゲームの台帳を保存する（ジャンル・タグ・発売日・層）"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=GAME_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=GAME_FIELDS, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows(games)
+        for g in games:
+            writer.writerow(dict(g,
+                                 genres='|'.join(sorted(g['genres'])),
+                                 tags='|'.join(sorted(g['tags']))))
 
 
-def select_games(args, already: set) -> list:
+def load_game_master(path: str) -> list:
+    """保存済みの台帳を読む（選定をやり直さず、同じ24本を収集し直すため）"""
+    with open(path, encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r['app_id'] = int(r['app_id'])
+        r['genres'] = set(filter(None, r.get('genres', '').split('|')))
+        r['tags'] = set(filter(None, r.get('tags', '').split('|')))
+    return rows
+
+
+def load_pool_cache(path: str) -> dict:
+    """母集団のメタ情報を読む（取得済みならAPIを叩かない）"""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_pool_cache(path: str, cache: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, ensure_ascii=False)
+
+
+def build_pool(args) -> list:
     """
-    収集対象のゲームを選ぶ。
+    母集団のメタ情報（レビュー数・発売日・ジャンル・タグ）を集める
 
-    実数合算で需要を測る方針のため、集めたレビューの内訳がそのまま需要スコアの
-    内訳になる。つまりゲーム選定は収集量の問題ではなく定義の一部であり、
-    ジャンルが偏らないよう条件を付ける（詳細は docs/decisions.md）。
+    ジャンルの下限を満たすには候補全部のジャンルを先に知っている必要があるため、
+    1本ずつ即決せず、いったん全件をキャッシュに集めてから選ぶ。取得済みのものは
+    APIを叩かないので、条件を変えた選び直しは数秒で終わる。
     """
-    popular = get_popular_games(n_pages=args.pages)
-    candidates = [g for g in popular if g[0] not in already]
-    random.seed(args.seed)
-    random.shuffle(candidates)
+    cache = load_pool_cache(args.pool_cache)
+    if args.refresh_pool or '__order__' not in cache:
+        listing = get_popular_games(n_pages=args.pages)
+        cache['__order__'] = [[app_id, name] for app_id, name in listing]
+        print(f'  母集団を取得: {len(listing)}本')
+    listing = cache['__order__']
 
-    selected = []
-    genre_counts, profile_counts = {}, {}
+    pool, fetched, failed = [], 0, 0
+    for i, (app_id, name) in enumerate(listing, 1):
+        rec = cache.setdefault(str(app_id), {})
+        rec.setdefault('name', name)
+        try:
+            # 1. レビュー数（1リクエスト。ここで6割が落ちるので最初に見る）
+            if 'total_reviews' not in rec:
+                summary = get_review_summary(app_id)
+                rec.update({k: summary.get(k, 0) for k in
+                            ('total_reviews', 'total_positive', 'total_negative')})
+                fetched += 1
+                time.sleep(args.sleep)
+            if rec.get('total_reviews', 0) < args.min_reviews:
+                continue
 
-    for app_id, name in candidates:
-        if len(selected) >= args.n_games:
-            break
-
-        # 1. レビュー数の下限（軽い1リクエストなので最初に弾く）
-        summary = get_review_summary(app_id)
-        time.sleep(args.sleep)  # 弾いた候補でもリクエストは投げているので待つ
-        total = summary.get('total_reviews', 0)
-        if total < args.min_reviews:
+            # 2. 発売日 → 3. ジャンル → 4. タグ（下限を通った候補にだけ聞く）
+            if 'release_date' not in rec:
+                rec['release_date'] = get_release_date(app_id)
+                fetched += 1
+                time.sleep(args.sleep)
+            if 'genres' not in rec:
+                rec['genres'] = sorted(get_game_genres(app_id))
+                fetched += 1
+                time.sleep(args.sleep)
+            if 'tags' not in rec:
+                rec['tags'] = get_game_tags(app_id, args.n_tags)
+                fetched += 1
+                time.sleep(args.sleep)
+        except Exception as exc:  # 1本の失敗で母集団作りを止めない
+            failed += 1
+            print(f'  取得失敗 {name[:30]}: {exc}')
             continue
+        finally:
+            if i % 50 == 0:
+                save_pool_cache(args.pool_cache, cache)
 
-        # 2. ジャンル判定（ノイズタグを除いた実ジャンルが取れるものだけ）
-        genres = get_game_genres(app_id) - NOISE_TAGS
-        time.sleep(args.sleep)
-        if not genres:
+        genres = frozenset(rec['genres']) - NOISE_TAGS
+        if not genres or not rec.get('release_date'):
             continue
-        if profile_counts.get(genres, 0) >= args.max_per_profile:
-            continue
-        if any(genre_counts.get(g, 0) >= args.max_per_genre for g in genres):
-            continue
-
-        # 3. タグ重なりで「似たゲーム」を弾く（粗いジャンルが取りこぼす被りを検出）
-        tags = set(get_game_tags(app_id, args.n_tags)) - TAG_NOISE
-        time.sleep(args.sleep)
-        if any(len(tags & set(g['tags'].split('|'))) >= args.tag_overlap_threshold
-               for g in selected):
-            continue
-
-        # 発売日は「収集が途中で切れたのか、発売がその期間内なのか」の判定に使う
-        selected.append({
+        pool.append({
             'app_id': app_id,
-            'name': name,
-            'genres': '|'.join(sorted(genres)),
-            'tags': '|'.join(sorted(tags)),
-            'total_reviews': total,
-            'total_positive': summary.get('total_positive', 0),
-            'total_negative': summary.get('total_negative', 0),
-            'release_date': get_release_date(app_id),
+            'name': rec['name'],
+            'genres': genres,
+            'tags': set(rec.get('tags') or ()) - TAG_NOISE,
+            'release_date': rec['release_date'],
+            'total_reviews': rec['total_reviews'],
+            'total_positive': rec.get('total_positive', 0),
+            'total_negative': rec.get('total_negative', 0),
         })
-        profile_counts[genres] = profile_counts.get(genres, 0) + 1
-        for g in genres:
-            genre_counts[g] = genre_counts.get(g, 0) + 1
-        print(f"  採用 [{len(selected):2d}/{args.n_games}] {name[:34]:34s} "
-              f"累計{total:>8,d}件  {'/'.join(sorted(genres))[:34]}")
-        time.sleep(args.sleep)
 
-    return selected
+    save_pool_cache(args.pool_cache, cache)
+    print(f'  候補 {len(pool)}本（母集団{len(listing)}本 / 新規取得{fetched}件'
+          f'{" / 失敗" + str(failed) + "本" if failed else ""}）')
+    return pool
+
+
+def select_from_pool(pool: list, window_start: str, min_history: str, args) -> tuple:
+    """
+    収集する対象を選ぶ。3つの条件を同時に満たす組を作る
+
+      1. 各ジャンル最低 genre_floor 本
+         1本しか入らないジャンルは、その1本の当たり外れがジャンルの結論になる
+      2. 土台（発売がウィンドウ開始より前）は max_backbone 本まで
+         土台は時系列の線を引く役だが、増やすほど新しい話題が入らなくなる。
+         上限にしているので、残り（n_games - max_backbone）が新しい側の下限になる
+      3. タグが tag_overlap_threshold 個以上重なるゲームは入れない
+         同じ需要を二重に数えないため
+
+    希少なジャンルから先に埋める。頻出ジャンルから埋めると枠を使い切ってしまい、
+    Racing や Sports の番が来たときに残りが無くなる。
+
+    Returns:
+        (選んだゲームのリスト, ジャンル別の本数)
+    """
+    candidates = [dict(g, backbone=g['release_date'] <= window_start)
+                  for g in pool if g['release_date'] <= min_history]
+    random.Random(args.seed).shuffle(candidates)
+
+    selected, genre_counts = [], {}
+
+    def acceptable(game):
+        if game['backbone'] and sum(1 for g in selected if g['backbone']) >= args.max_backbone:
+            return False
+        if any(genre_counts.get(x, 0) >= args.max_per_genre for x in game['genres']):
+            return False
+        return not any(len(game['tags'] & g['tags']) >= args.tag_overlap_threshold
+                       for g in selected)
+
+    def take(game):
+        selected.append(game)
+        for x in game['genres']:
+            genre_counts[x] = genre_counts.get(x, 0) + 1
+
+    # 1. 希少なジャンルから下限を埋める（期間の頭を埋められるのは土台だけなので土台を優先）
+    rarity = Counter(x for g in candidates for x in g['genres'])
+    for genre in sorted(rarity, key=lambda x: rarity[x]):
+        while genre_counts.get(genre, 0) < args.genre_floor and len(selected) < args.n_games:
+            pick = (next((g for g in candidates if g not in selected and genre in g['genres']
+                          and g['backbone'] and acceptable(g)), None)
+                    or next((g for g in candidates if g not in selected and genre in g['genres']
+                             and acceptable(g)), None))
+            if not pick:
+                break
+            take(pick)
+
+    # 2. 残りを埋める
+    while len(selected) < args.n_games:
+        pick = next((g for g in candidates if g not in selected and acceptable(g)), None)
+        if not pick:
+            break
+        take(pick)
+
+    return selected, genre_counts
+
+
+def report_selection(games: list, genre_counts: dict, pool: list, args) -> None:
+    """選定結果の内訳を出す（層とジャンルの配分がそのまま需要スコアの配分になる）"""
+    tiers = Counter(g['tier'] for g in games)
+    print(f"  {len(games)}本を選定 — 土台{tiers['土台']} / 中間{tiers['中間']} / "
+          f"直近{tiers['直近']}")
+    for g in sorted(games, key=lambda x: x['release_date']):
+        print(f"  {g['tier']} {g['name'][:32]:32s} {g['release_date']} "
+              f"{g['total_reviews']:>8,d}件  {'/'.join(sorted(g['genres']))[:30]}")
+    print(f"  ジャンル別: {dict(sorted(genre_counts.items(), key=lambda x: -x[1]))}")
+    short = sorted(x for x in {y for g in pool for y in g['genres']}
+                   if genre_counts.get(x, 0) < args.genre_floor)
+    if short:
+        print(f"  ⚠️ 下限{args.genre_floor}本に届かなかったジャンル: {short}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='時系列予測用のレビュー収集')
     parser.add_argument('--years', type=float, default=3, help='遡る年数')
-    parser.add_argument('--n-games', type=int, default=30, help='収集するゲーム数')
+    parser.add_argument('--n-games', type=int, default=24, help='収集するゲーム数')
     parser.add_argument('--min-reviews', type=int, default=10000,
                         help='採用するゲームの累計レビュー数の下限')
     parser.add_argument('--pages', type=int, default=20,
                         help='母集団取得のページ数（1ページ約25件）')
-    parser.add_argument('--max-per-genre', type=int, default=6,
-                        help='1ジャンルあたりの最大採用数')
-    parser.add_argument('--max-per-profile', type=int, default=2,
-                        help='同じジャンル集合あたりの最大採用数')
+    parser.add_argument('--genre-floor', type=int, default=3,
+                        help='1ジャンルあたりの最低採用数。1本だとその1本の当たり外れが'
+                             'ジャンルの結論になる')
+    parser.add_argument('--max-backbone', type=int, default=14,
+                        help='土台（発売がウィンドウ開始より前）の上限。'
+                             'n-games から引いた数が「新しい側」の下限になる')
+    parser.add_argument('--max-per-genre', type=int, default=12,
+                        help='1ジャンルあたりの最大採用数（1ジャンルが全部を占める退化を防ぐ保険）')
+    parser.add_argument('--min-history-years', type=float, default=1.0,
+                        help='この年数より後に発売したゲームは対象外（履歴が短すぎる）')
+    parser.add_argument('--recent-years', type=float, default=2.0,
+                        help='この年数以内の発売を「直近」として台帳に記録する')
+    parser.add_argument('--pool-cache', default='data/timeseries/pool_cache.json',
+                        help='母集団のメタ情報のキャッシュ。2回目以降はAPIを叩かない')
+    parser.add_argument('--refresh-pool', action='store_true',
+                        help='母集団の一覧を取り直す（売上上位は日々入れ替わる）')
+    parser.add_argument('--reselect', action='store_true',
+                        help='既存の台帳を捨ててゲームを選び直す')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='選定だけ行い、収集はしない（条件を変えて顔ぶれを確認する用）')
     parser.add_argument('--n-tags', type=int, default=6, help='タグ重なり判定で見る上位タグ数')
     parser.add_argument('--tag-overlap-threshold', type=int, default=2,
                         help='この数以上タグが共通したら「似たゲーム」として弾く')
@@ -291,28 +425,49 @@ def main():
     if already:
         print(f'\n期間を全部カバーできた {len(already)}ゲームをスキップします')
 
-    # 2. ゲームを選ぶ
-    print('\n[1/2] ゲーム選定')
-    games = select_games(args, already)
-    if not games:
-        print('  条件を満たすゲームが見つかりませんでした')
+    # 2. 収集対象を決める。台帳があればそれを使う（実行のたびに顔ぶれが変わらないように）
+    if os.path.exists(args.games_output) and not args.reselect:
+        games = load_game_master(args.games_output)
+        print(f'\n[1/2] 既存の台帳を使用: {len(games)}本（選び直すなら --reselect）')
+    else:
+        print('\n[1/2] ゲーム選定')
+        today = dt.datetime.now(dt.timezone.utc).date()
+        window_start = since_date.isoformat()
+        min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
+        recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+
+        pool = build_pool(args)
+        games, genre_counts = select_from_pool(pool, window_start, min_history, args)
+        if not games:
+            print('  条件を満たすゲームが見つかりませんでした')
+            return
+        for g in games:
+            g['tier'] = ('土台' if g['release_date'] <= window_start
+                         else '直近' if g['release_date'] > recent_from else '中間')
+        report_selection(games, genre_counts, pool, args)
+        save_game_master(args.games_output, games)
+        print(f'  台帳を保存: {args.games_output}')
+
+    if args.dry_run:
+        print('\n--dry-run のため収集は行わない')
         return
 
-    # 3. ゲーム台帳を保存する。ジャンル・タグは選定時にしか手元に無いので、
-    #    ここで残さないと後から偏りを分析できない（再取得が必要になる）
-    save_game_master(args.games_output, games)
-    print(f'  台帳を保存: {args.games_output}')
+    # 3. まだ期間を全部カバーできていないゲームだけを収集する
+    targets = [g for g in games if g['app_id'] not in already]
+    if not targets:
+        print('\n全ゲームが期間を全部カバー済み。収集するものはありません')
+        return
 
     # 4. 再収集するゲームの古い行を消す（追記方式なので放置すると二重になる）
-    removed = drop_game_rows(args.output, {g['app_id'] for g in games})
+    removed = drop_game_rows(args.output, {g['app_id'] for g in targets})
     if removed:
         print(f'  再収集のため既存 {removed:,}行を削除')
 
     # 5. ゲームごとに期間指定で収集し、1本ずつ追記する
-    print(f'\n[2/2] レビュー収集（{len(games)}ゲーム）')
+    print(f'\n[2/2] レビュー収集（{len(targets)}ゲーム）')
     total_rows = 0
     incomplete = []
-    for i, game in enumerate(games, 1):
+    for i, game in enumerate(targets, 1):
         app_id, name = game['app_id'], game['name']
         log = {'app_id': app_id, 'name': name,
                'collected_at': dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -322,7 +477,7 @@ def main():
                 max_reviews=args.max_reviews_per_game, sleep=args.sleep,
             )
         except Exception as exc:  # 1本失敗しても全体を止めない
-            print(f"  [{i:2d}/{len(games)}] {name[:30]:30s} 失敗: {exc}")
+            print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} 失敗: {exc}")
             append_log(args.log_output, dict(log, rows=0, oldest='', newest='',
                                              coverage='partial', stop_reason=f'error: {exc}'))
             incomplete.append((name, f'error: {exc}'))
@@ -348,7 +503,7 @@ def main():
             missing = (oldest - since_ts) / 86400 if oldest else 0
             note = f'  ⚠️ 期間未達（{missing:.0f}日分不足・{coverage}/{reason[:24]}）'
             incomplete.append((name, reason))
-        print(f"  [{i:2d}/{len(games)}] {name[:30]:30s} {len(rows):>6,d}件  "
+        print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {len(rows):>6,d}件  "
               f"ポジ率{ratio:>5.1%}  最古{fmt_date(oldest)}  （累計 {total_rows:,}件）{note}")
         time.sleep(args.sleep)
 

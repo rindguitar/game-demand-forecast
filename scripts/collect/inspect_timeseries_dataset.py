@@ -107,11 +107,11 @@ def report_ratio(reviews: list, games: dict) -> None:
           f'  乖離 {gap:+.1%}')
     if abs(gap) <= 0.05:
         print('  → 期待値どおり。均衡させずに集められている')
-        print('  ※ 期待値は全言語・全期間の集計なので、英語のみ・直近3年の実測が'
+        print('  ※ 期待値は全期間の集計（言語は収集と同じ英語）。直近3年だけを見ると'
               '数pt下振れるのは正常')
     else:
         print('  → 期待値から外れている。収集方法を確認すること')
-        print('  ※ 期待値は全言語・全期間の集計。収集期間が短いほど差は出やすい')
+        print('  ※ 期待値は全期間の集計（言語は収集と同じ英語）。収集期間が短いほど差は出やすい')
 
 
 def report_game_concentration(reviews: list, top_n: int) -> None:
@@ -175,6 +175,34 @@ def report_genre_divergence(reviews: list, games: dict) -> None:
     print('  ※ 本数で均衡させても量で偏る場合、ジャンル均衡は見かけだけになる')
 
 
+def report_tiers(reviews: list, games: dict) -> None:
+    """
+    層（土台/中間/直近）ごとの本数とレビュー量を見る
+
+    土台は時系列の線を引く役、直近は新しい話題を運ぶ役で、仕事が違う。
+    量まで土台に寄っていると、直近を入れた意味が薄くなる。
+    """
+    if not games or 'tier' not in next(iter(games.values()), {}):
+        return
+    counts, volume = defaultdict(int), defaultdict(int)
+    for info in games.values():
+        counts[info['tier']] += 1
+    for r in reviews:
+        info = games.get(int(r['game_id']))
+        if info:
+            volume[info['tier']] += 1
+    total = sum(volume.values())
+    print('\n## 2b. 層別（発売時期）の内訳')
+    for tier in ('土台', '中間', '直近'):
+        if not counts.get(tier):
+            continue
+        share = volume[tier] / total if total else 0
+        print(f'  {tier} {counts[tier]:>3d}本  レビュー {volume[tier]:>8,d}件 '
+              f'{share:>6.1%}  {bar(share)}')
+    print('  ※ 土台=期間の先頭から存在する（時系列の線を引く）/ '
+          '直近=新しい話題を運ぶ')
+
+
 def report_roster_change(reviews: list, bucket_days: int) -> None:
     """
     期間ごとの参加ゲーム数の変化を見る。
@@ -233,6 +261,7 @@ def main():
     report_coverage(args.log)
     report_ratio(reviews, games)
     report_game_concentration(reviews, args.top_n)
+    report_tiers(reviews, games)
     report_genre_divergence(reviews, games)
     report_roster_change(reviews, args.bucket_days)
 
