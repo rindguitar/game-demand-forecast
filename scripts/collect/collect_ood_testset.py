@@ -60,9 +60,12 @@ NOISE_TAGS = {'Indie', 'Free To Play', 'Early Access'}
 # タグ重なり判定から除外するノイズタグ
 # 17本の実データ分析で「無関係なゲーム同士の誤爆」を生んでいたタグを特定（憶測ではなく実例ベース）。
 # 気分・機能・開発規模を表すもので、遊びの被りを意味しないため除外する。
+# 「誰と遊ぶか」も同じ理由で除外する（2026-09-04追加・docs/decisions.md）。
+# Massively Multiplayer は公式ジャンルにもある遊びの形なので残す。
 TAG_NOISE = {
     'Singleplayer', 'Great Soundtrack', 'Atmospheric', 'Surreal',
     'Free to Play', 'Indie', 'Early Access',
+    'Multiplayer', 'Co-op', 'Online Co-Op', 'Local Co-Op', 'PvP', 'PvE',
 }
 
 def get_game_genres(app_id: int) -> frozenset:
