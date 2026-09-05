@@ -6,6 +6,7 @@ BERTopicを使用してゲームレビューからトピック（ゲーム要素
 
 from typing import List, Tuple, Dict, Optional
 import pandas as pd
+import os
 import re
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
@@ -58,7 +59,28 @@ def filter_english_reviews(df: pd.DataFrame, text_column: str = 'review_text') -
     return df_english.drop(columns=['is_english'])
 
 
-def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text', game_name_column: str = 'game_name') -> pd.DataFrame:
+def load_proper_nouns(path: str) -> List[str]:
+    """
+    除去する固有名詞のリストを読む（1行1語・# はコメント）
+
+    ロスター外の開発元名・タイトル名を置く。収集対象ゲームの名前は台帳から
+    自動で作れるので、ここには含めない。
+    """
+    if not path:
+        return []
+    if not os.path.exists(path):
+        # 黙って空を返すと「除去したつもり」で進んでしまうので必ず知らせる
+        print(f"⚠️ 固有名詞のファイルが見つかりません: {path}（追加の除去は行われません）")
+        return []
+    with open(path, encoding='utf-8') as f:
+        return [line.strip() for line in f
+                if line.strip() and not line.lstrip().startswith('#')]
+
+
+def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
+                      game_name_column: str = 'game_name',
+                      all_games: bool = False,
+                      extra_words: Optional[List[str]] = None) -> pd.DataFrame:
     """
     各レビューから自ゲームのタイトル単語を除去
 
@@ -68,6 +90,11 @@ def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text', game_n
     除去フィルター:
         - 2文字以下の単語（"v", "of", "a"等）
         - 数字のみの単語（"2077", "3", "5"等）
+
+    all_games=True にすると、**全ゲームの名前を全レビューから**除去する。自分の名前
+    だけを消すと他ゲームへの言及が残り、トピックがそのゲーム専用になる（実測: Starfield
+    のレビューに bethesda / skyrim / fallout が残り、1,409件のトピックが Starfield 95%
+    になった）。extra_words にはロスター外の固有名詞（開発元名など）を渡す。
 
     Args:
         df: レビューデータフレーム
@@ -89,6 +116,23 @@ def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text', game_n
         for word in words:
             text = re.sub(rf'\b{re.escape(word)}\b', '', text, flags=re.IGNORECASE)
         return text.strip()
+
+    # 全レビューから除去する場合は、語をまとめて1つの正規表現にして1回で走らせる
+    # （ゲームごとに何十回も全文を走査すると、数十万件では時間が桁で変わる）
+    if all_games or extra_words:
+        words = {w.lower() for w in (extra_words or []) if len(w) > 3}
+        for game_name in df_copy[game_name_column].dropna().unique():
+            words.update(_get_game_words(game_name))
+        if words:
+            # 長い語から順に消す（"dark souls" を "souls" より先に処理する）
+            ordered = sorted(words, key=len, reverse=True)
+            pattern = r'\b(' + '|'.join(re.escape(w) for w in ordered) + r')\b'
+            df_copy[text_column] = (df_copy[text_column].astype(str)
+                                    .str.replace(pattern, ' ', regex=True, case=False)
+                                    .str.replace(r'\s+', ' ', regex=True)
+                                    .str.strip())
+        print(f"固有名詞の除去完了: {len(words)}語を全レビューから除去")
+        return df_copy
 
     for game_name, group_idx in df_copy.groupby(game_name_column).groups.items():
         game_words = _get_game_words(game_name)
@@ -213,6 +257,68 @@ def extract_topics(
         print("=" * 70)
 
     return topic_model, topics, probabilities
+
+
+def assign_topics(
+    topic_model: BERTopic,
+    texts: List[str],
+    verbose: bool = True
+) -> Tuple[List[int], List[float]]:
+    """
+    学習済みモデルで、テキストにトピックを割り当てる（transform）
+
+    学習（fit）と割り当て（transform）を分けるのは、次元削減とクラスタリングが件数に
+    弱いため。重い処理は一部のデータで済ませ、割り当ては「既にできている塊のどれに
+    近いか」を見るだけなので全件に掛けられる（詳細は Wiki「トピック抽出」）。
+
+    Args:
+        topic_model: 学習済みBERTopicモデル
+        texts: 割り当て対象のテキスト
+        verbose: 詳細ログ表示
+
+    Returns:
+        (トピックIDのリスト, 確率のリスト)
+    """
+    if verbose:
+        print(f"トピック割り当て（transform）: {len(texts):,}件")
+
+    topics, probabilities = topic_model.transform(texts)
+    topics = [int(t) for t in topics]
+
+    if verbose:
+        outlier = topics.count(-1)
+        print(f"割り当て完了: {len(set(topics) - {-1})}トピック / "
+              f"Outlier {outlier:,}件 ({outlier / len(topics) * 100:.1f}%)")
+
+    return topics, probabilities
+
+
+def save_topic_model(
+    topic_model: BERTopic,
+    path: str,
+    embedding_model_name: str = 'all-MiniLM-L6-v2'
+) -> None:
+    """
+    学習済みモデルを保存する
+
+    埋め込みモデルは本体を書き出さず名前だけ記録する（サイズが大きく、
+    名前があれば再取得できるため）。
+    """
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    topic_model.save(
+        path,
+        serialization='safetensors',
+        save_ctfidf=True,
+        save_embedding_model=embedding_model_name,
+    )
+
+
+def load_topic_model(
+    path: str,
+    embedding_model_name: str = 'all-MiniLM-L6-v2'
+) -> BERTopic:
+    """保存済みモデルを読み込む（再学習を避けるため）"""
+    return BERTopic.load(path, embedding_model=embedding_model_name)
 
 
 def get_topic_info(topic_model: BERTopic, verbose: bool = True) -> pd.DataFrame:

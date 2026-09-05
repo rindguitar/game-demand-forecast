@@ -1,0 +1,62 @@
+# トピック抽出で除去する固有名詞（1行1語・# はコメント）
+#
+# 収集対象ゲームの名前は games.csv から自動で作るので、ここには書かない。
+# ここに置くのは「レビュー本文に出てくる、ロスター外の固有名詞」。
+#
+# 入れる基準:
+#   - 4文字以上（短い語は誤爆する）
+#   - 一般語と紛れないもの。rust / control / prey / journey / inside / limbo などの
+#     タイトルは、普通の英単語として使われるので入れない
+#   - 略称（OW / CoD / BotW）は誤爆が大きいので入れない
+#
+# 実測（2026-09-05・2万件）で言及が多かった順に並べている。
+
+# --- 開発元・パブリッシャー ---
+bethesda
+rockstar
+netease
+hazelight
+blizzard
+valve
+ubisoft
+activision
+larian
+arrowhead
+capcom
+fromsoftware
+square enix
+epic games
+riot games
+
+# --- 他タイトル（ロスター外） ---
+overwatch
+fallout
+skyrim
+cyberpunk
+stardew
+fortnite
+minecraft
+terraria
+palworld
+valorant
+witcher
+elden ring
+dark souls
+apex legends
+baldur
+helldivers
+valheim
+rimworld
+animal crossing
+zelda
+league of legends
+counter strike
+battlefield
+monster hunter
+world of warcraft
+runescape
+roblox
+subnautica
+sea of thieves
+deep rock
+satisfactory
