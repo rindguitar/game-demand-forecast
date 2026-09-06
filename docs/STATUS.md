@@ -10,7 +10,7 @@
 
 Phase 3（感情分析）を予定表の想定より深く実装したため、Phase 5 と 6 が空いていた。依存関係は「Phase 2 の自動収集 → Phase 5 の継続収集 → Phase 6 の時系列整形 → Phase 7 の Prophet」で、積み残し1つが3フェーズを止めていた。
 
-**2026-09-06時点**: 本収集は完走済み（24ゲーム・721,799件・全ゲーム3年分）。トピック抽出も本番実行まで完了したが、**前処理の欠陥を見つけて直したので、本番をやり直す必要がある**。
+**2026-09-06時点**: 本収集は完走済み（24ゲーム・721,799件・全ゲーム3年分）。トピック抽出は**前処理の欠陥を直した版で再実行まで完了**（455トピック・時系列に乗るのは全24本で60個・土台13本で14個）。次はどのトピックを時系列に乗せるかの選定。
 
 なお Phase 5 の「継続的データ収集（最低1ヶ月分）」は1ヶ月待つ必要はない。Steamレビューは `timestamp_created` を持ち古い方へ遡れるため、過去分をまとめて取得できる。
 
@@ -18,9 +18,9 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 
 ### 2026-09-06: トピック抽出の本番実行と、前処理の欠陥の是正
 
-**本番実行は完走した**（452トピック・Outlier 43.3%・23分）。時系列に乗るのは全24本で67個・土台13本で15個（→ `docs/experiments.md` 7.）。
+**本番実行を2回した**（欠陥を直す前と後）。採用するのは修正後の455トピック版（→ `docs/experiments.md` 7.）。
 
-**ただし結果を点検して、前処理に構造的な欠陥が見つかった。**
+**1回目の結果を点検して、前処理に構造的な欠陥が見つかった。**
 
 - `remove_game_names(all_games=True)` がロスター24本の名前を**単語に割って全721,799件から消していた**（48語）。その中に `magic` `fantasy` `online` `simulator` `civilization` `wild` `human` `split` といった内容語が多数含まれていた
 - 最も分かりやすい例が `split`。**Split Screen は Split Fiction 自身に付いているSteamタグ**なのに、ゲーム名に含まれるという理由で全24本から消えていた
@@ -35,6 +35,8 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 ```
 
 修正の途中で**同じ誤りが自分の設計にも残っていた**。1語タイトルは「完全なタイトル」でもあるため全レビューから消える設計になっており、`predecessor`（総1,815回のうち1,108回が Silksong の「前作」の意味）を失うところだった。1語は人が `proper_nouns.txt` に書く形に変更。テスト6件追加・全56件 green。
+
+**再実行で修正が効いたことを確認**（`docs/experiments.md` 8.）。`civilization` が WorldBox の「文明を育てる」トピックに、`simulator` が **top1 13% の完全な横断トピック**に、`predecessor` が「前作」トピックになって戻った。見かけの数字（週10件以上 67個 → 60個）は微減したが、これは語彙が戻ってトピックが細かく割れたためで、**横断トピックの言及量シェアは 40.2% → 43.8% に増えている**。
 
 **decisions.md に7件追記**（`9a96814`）。固有名詞除去の判断がそれまで一度も記録されていなかった（grep 0件）。根拠は `topic.py` の docstring だけで、実装とずれても気づけない状態だった。
 
@@ -97,24 +99,28 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 
 ## 次の一手（優先順）
 
-1. **`team cherry` を `configs/proper_nouns.txt` に足すかを決める** — Silksong の開発元で、本番実行で4,912件のトピックを作った。ファイル自身の基準（4文字以上・一般語と紛れない・略称でない）は満たす。2語のフレーズなので `cherry` 単体は残る。いまはコメントに「未反映の候補」として書いてあるだけ
+1. **時系列に乗せるトピックを選ぶ** — 全24本で60個 / 土台13本で14個。どちらのパネルを主軸にするかと合わせて決める。1ゲーム90%以上の15個をどう扱うか（機械的に外すか）もここで決まる
 
-2. **修正版でトピック抽出を再実行**（約23分）
+2. **`team cherry` を `configs/proper_nouns.txt` に足すかを決める**（保留中） — Silksong の開発元で、再実行後も2,336件のトピック（t122）を作っている。ファイル自身の基準（4文字以上・一般語と紛れない・略称でない）は満たす。2語のフレーズなので `cherry` 単体は残る。ただし top1 100% なので集中度による機械的な除外でも主軸からは外れる。追加するなら再実行が必要（約24分）
 
-   ```bash
-   docker compose exec dev python scripts/nlp/extract_topics.py \
-       --input data/timeseries/reviews_timeseries.csv \
-       --sample-per-game 5000 --fit-sample-size 100000 \
-       --skip-english-filter --remove-all-game-names \
-       --model-output models/topic_full
-   ```
+3. **PRを出してマージ** — `feature/timeseries-collector` にコミットが溜まっている（PR未作成）
+4. Phase 6（時系列データ整形）→ Phase 7（Prophet実装）
 
-   前回の出力（452トピック版）を残したい場合は `--output` / `--stats-output` / `--model-output` を別名にする。
-   **このとき46語とロスター分割の寄与を分けて測る**（`bf83f53` の 38.1%→26.6% は両方を同時に入れた数字で分けられていない）。
+### 未実施のまま残っている測定
 
-3. **時系列に乗せるトピックを選ぶ** — どちらのパネルを主軸にするかと合わせて決める。全24本で67個・土台13本で15個（修正前の数字なので再実行後に測り直す）
-4. **PRを出してマージ** — `feature/timeseries-collector` にコミットが溜まっている（PR未作成）
-5. Phase 6（時系列データ整形）→ Phase 7（Prophet実装）
+**`proper_nouns.txt` 46語とロスター名分割の寄与を分けて測っていない**（`bf83f53` の 38.1%→26.6% は両方を同時に入れた数字）。分けるには除去なしの版をもう1回回す必要がある。
+
+### トピック抽出のコマンド
+
+```bash
+docker compose exec dev python scripts/nlp/extract_topics.py \
+    --input data/timeseries/reviews_timeseries.csv \
+    --sample-per-game 5000 --fit-sample-size 100000 \
+    --skip-english-filter --remove-all-game-names \
+    --model-output models/topic_full
+```
+
+出力は既定で上書きされる（`reviews_timeseries_with_topics.csv` / `topic_statistics.csv`）。残したいときは `--output` / `--stats-output` / `--model-output` を別名にする。
 
 ### 収集をやり直すときのコマンド
 
