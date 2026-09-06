@@ -77,74 +77,104 @@ def load_proper_nouns(path: str) -> List[str]:
                 if line.strip() and not line.lstrip().startswith('#')]
 
 
+def _title_tokens(game_name: str) -> List[str]:
+    """ゲーム名を英数字の並びに割る（"Magic: The Gathering Arena" → magic/the/gathering/arena）"""
+    return re.findall(r'[a-zA-Z0-9]+', game_name.lower())
+
+
+def _phrase_pattern(name: str, min_tokens: int = 1) -> Optional[str]:
+    """名前を「語の並び」としてだけ一致させる正規表現を作る
+
+    語の間は記号でも空白でもよいので、"Magic: The Gathering Arena" と
+    "magic the gathering arena" の両方に当たる。単語がバラバラに出てくる
+    ケース（"magic" 単体）には当たらない。
+
+    min_tokens 未満の語数の名前は None を返す。1語のタイトルは並びが単語と
+    同じになるため、自動で全レビューから消すと一般語を巻き添えにする
+    （実測: predecessor は1,815回中1,108回が Silksong の「前作」の意味）。
+    """
+    tokens = _title_tokens(name)
+    if len(tokens) < min_tokens:
+        return None
+    return r'\b' + r'\W+'.join(re.escape(t) for t in tokens) + r'\b'
+
+
+def _replace_patterns(series: pd.Series, patterns: List[str]) -> pd.Series:
+    """複数の正規表現をまとめて1回で消す（何十回も全文を走査すると桁で遅くなる）"""
+    if not patterns:
+        return series
+    combined = '(?:' + '|'.join(patterns) + ')'
+    return (series.astype(str)
+            .str.replace(combined, ' ', regex=True, case=False)
+            .str.replace(r'\s+', ' ', regex=True)
+            .str.strip())
+
+
 def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
                       game_name_column: str = 'game_name',
                       all_games: bool = False,
                       extra_words: Optional[List[str]] = None) -> pd.DataFrame:
     """
-    各レビューから自ゲームのタイトル単語を除去
+    レビューからゲーム名・固有名詞を除去する
 
-    自己言及問題（GTA Onlineのレビューに"gta online"が含まれる等）を防ぐため、
-    各レビューのgame_name列の単語をレビューテキストから除去する。
+    除去の範囲は「語」ではなく「語 × ゲーム」で決める。同じ語がゲームによって
+    固有名詞にも内容語にもなるため（legacy は GTA では版名、Civ では歴史の遺産）。
+    詳細は docs/decisions.md 2026-09-06。
 
-    除去フィルター:
-        - 2文字以下の単語（"v", "of", "a"等）
+    1. 全レビューから消すもの: 2語以上のタイトルの**並び**（"magic the gathering arena"）と
+       extra_words。並びでしか一致しないので、"magic" 単体は内容語として残る。
+       1語のタイトル（Starfield / Predecessor）は自動では消さない。消したいものは
+       人が extra_words（configs/proper_nouns.txt）に書く
+    2. 自分のゲームのレビューからだけ消すもの: タイトルを単語に割ったもの
+       （MTGのレビューでだけ "magic" "arena" が消え、他ゲームでは残る）
+
+    all_games=False のときは 2 だけを行う。
+
+    除去フィルター（2 のみ）:
+        - 3文字以下の単語（"v", "of", "the"等）
         - 数字のみの単語（"2077", "3", "5"等）
-
-    all_games=True にすると、**全ゲームの名前を全レビューから**除去する。自分の名前
-    だけを消すと他ゲームへの言及が残り、トピックがそのゲーム専用になる（実測: Starfield
-    のレビューに bethesda / skyrim / fallout が残り、1,409件のトピックが Starfield 95%
-    になった）。extra_words にはロスター外の固有名詞（開発元名など）を渡す。
 
     Args:
         df: レビューデータフレーム
         text_column: テキストカラム名
         game_name_column: ゲーム名カラム名
+        all_games: True で 1 と 2 の両方、False で 2 のみ
+        extra_words: ロスター外の固有名詞（開発元名など）。1 として扱う
 
     Returns:
-        ゲーム名除去済みのデータフレーム
+        除去済みのデータフレーム
     """
     df_copy = df.copy()
+    names = [n for n in df_copy[game_name_column].dropna().unique()]
 
-    def _get_game_words(game_name: str) -> List[str]:
-        """ゲーム名から除去対象の単語リストを生成"""
-        words = re.findall(r'[a-zA-Z0-9]+', game_name.lower())
-        return [w for w in words if len(w) > 3 and not w.isnumeric()]
-
-    def _remove_words(text: str, words: List[str]) -> str:
-        """テキストから単語リストを除去"""
-        for word in words:
-            text = re.sub(rf'\b{re.escape(word)}\b', '', text, flags=re.IGNORECASE)
-        return text.strip()
-
-    # 全レビューから除去する場合は、語をまとめて1つの正規表現にして1回で走らせる
-    # （ゲームごとに何十回も全文を走査すると、数十万件では時間が桁で変わる）
+    # 1. 全レビューから、完全なタイトルの並びと extra_words を消す
     if all_games or extra_words:
-        words = {w.lower() for w in (extra_words or []) if len(w) > 3}
-        for game_name in df_copy[game_name_column].dropna().unique():
-            words.update(_get_game_words(game_name))
-        if words:
-            # 長い語から順に消す（"dark souls" を "souls" より先に処理する）
-            ordered = sorted(words, key=len, reverse=True)
-            pattern = r'\b(' + '|'.join(re.escape(w) for w in ordered) + r')\b'
-            df_copy[text_column] = (df_copy[text_column].astype(str)
-                                    .str.replace(pattern, ' ', regex=True, case=False)
-                                    .str.replace(r'\s+', ' ', regex=True)
-                                    .str.strip())
-        print(f"固有名詞の除去完了: {len(words)}語を全レビューから除去")
-        return df_copy
+        # 長い名前から先に消す（"Hollow Knight: Silksong" を "Silksong" より先に処理する）
+        titles = sorted((str(n) for n in names), key=len, reverse=True) if all_games else []
+        extras = sorted(extra_words or [], key=len, reverse=True)
+        patterns = [p for p in
+                    ([_phrase_pattern(t, min_tokens=2) for t in titles]
+                     + [_phrase_pattern(e) for e in extras])
+                    if p]
+        df_copy[text_column] = _replace_patterns(df_copy[text_column], patterns)
+        print(f"全レビューからの除去完了: 2語以上のタイトル{len(titles)}件中"
+              f"{sum(1 for t in titles if _phrase_pattern(t, min_tokens=2))}件"
+              f" + 固有名詞{len(extras)}語")
 
+    # 2. 各ゲームのレビューから、自分のタイトルを割った単語を消す
+    removed_per_game = {}
     for game_name, group_idx in df_copy.groupby(game_name_column).groups.items():
-        game_words = _get_game_words(game_name)
-        if not game_words:
+        words = [w for w in _title_tokens(str(game_name))
+                 if len(w) > 3 and not w.isnumeric()]
+        if not words:
             continue
-        df_copy.loc[group_idx, text_column] = df_copy.loc[group_idx, text_column].apply(
-            lambda text: _remove_words(str(text), game_words)
-        )
+        removed_per_game[game_name] = words
+        patterns = [rf'\b{re.escape(w)}\b' for w in sorted(words, key=len, reverse=True)]
+        df_copy.loc[group_idx, text_column] = _replace_patterns(
+            df_copy.loc[group_idx, text_column], patterns)
 
-    print(f"ゲーム名除去完了")
-    for game_name in df_copy[game_name_column].unique():
-        words = _get_game_words(game_name)
+    print(f"自ゲーム名の除去完了: {len(removed_per_game)}本")
+    for game_name, words in removed_per_game.items():
         print(f"  {game_name}: {words}")
 
     return df_copy
