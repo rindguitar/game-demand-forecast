@@ -1,0 +1,173 @@
+# トピックの分類に使う語彙（1行1語または語句・# はコメント）
+#
+# docs/decisions.md 2026-08-18「トピックを3分類し、仕分けは ルール→手動→分類器 で実装する」
+# の第一段（ルール）で使う。ここに載っていない語しか持たないトピックは
+# ①ゲーム要素 と判定する（要素が本命で、それ以外を差し引く形にしている）。
+#
+# 分類:
+#   [quality]      ②品質・運営      … 不具合・性能・運営の対応・コミュニティの荒れ
+#   [business]     ③ビジネス条件    … 価格・課金モデル。需要量に合算せず阻害要因の別枠に置く
+#   [contentless]  中身なし          … 賞賛/罵倒・メタ言及・プレイ時間。需要の手がかりにならない
+#   （どれにも当たらない）①ゲーム要素 … 需要スコアの対象
+#
+# 語彙は 2026-09-06 の本番実行（455トピック）で、週10件以上の60トピックの
+# キーワードを目視して作った。増やすときは実データのキーワードから採ること。
+#
+# 一般語と紛れる語は入れない（proper_nouns.txt と同じ方針）。
+#   例: "run"（動作 / 走る）、"support"（サポート体制 / 対応プラットフォーム）は入れない
+
+[quality]
+# 不具合
+bug
+bugs
+buggy
+crash
+crashes
+crashing
+glitch
+glitches
+glitchy
+freeze
+freezes
+freezing
+unplayable
+broken
+unstable
+# 性能・最適化
+performance
+optimization
+optimized
+optimisation
+fps
+frame rate
+framerate
+stutter
+stuttering
+lag
+laggy
+dlss
+# 運営・開発元の対応
+devs
+developers
+updates
+patch
+patches
+roadmap
+abandoned
+dead game
+no support
+cash grab
+greedy
+anti-consumer
+# アカウント・接続・サーバー
+account
+password
+login
+launcher
+server
+servers
+disconnected
+disconnect
+downtime
+queue times
+# 対戦環境の運用
+matchmaking
+ranked
+balancing
+balance
+balanced
+unbalanced
+cheaters
+hackers
+smurfs
+# コミュニティの荒れ
+toxic
+toxicity
+toxic community
+harassment
+
+[business]
+price
+priced
+overpriced
+worth
+worth price
+sale
+discount
+dollars
+bucks
+expensive
+cheap
+free
+free game
+free play
+free start
+dlc
+dlcs
+expansion pass
+season pass
+battle pass
+microtransaction
+microtransactions
+mtx
+paywall
+pay to win
+p2w
+subscription
+sub fee
+monetization
+monetisation
+skins
+cosmetics
+refund
+refunded
+cut content
+day one dlc
+complete edition
+
+[contentless]
+# 賞賛・罵倒（中身を伴わない）
+best game
+best games
+game best
+goty
+game year
+peak
+peak game
+masterpiece
+amazing
+awesome
+good good
+pretty good
+pretty
+recommend
+recommended
+would recommend
+better better
+trash
+garbage
+worst game
+# メタ言及（レビューそのものについて語る）
+review
+reviews
+negative review
+positive review
+first review
+write review
+# プレイ時間・依存
+hours
+hours game
+played hours
+hundreds hours
+addictive
+addicted
+addicting
+# 時間つぶし
+pass time
+kill time
+time killer
+waste time
+# 内容の無い量の言及
+lots stuff
+lots things
+entertaining

@@ -80,18 +80,33 @@ flowchart LR
 `train_dapt.py` が作るのは「Steamの言い回しに慣れただけ」のモデルで、まだ感情は判定できません。
 それを土台に `train_sentiment.py` で微調整して、本番モデル `models/best_model` になります。
 
-**トピック抽出**（上とは独立に動く）
+**トピック抽出と仕分け**（上とは独立に動く）
 
 ```mermaid
 flowchart LR
-    D1b[("data/train/reviews_10000.csv")] --> T3["extract_topics.py"] --> D4[("reviews_10000_with_topics.csv")]
+    R[("reviews_timeseries.csv")] --> E["extract_topics.py"]
+    P[("configs/proper_nouns.txt")] --> E
+    E --> W[("reviews_timeseries<br/>_with_topics.csv")]
+    E --> S[("topic_statistics.csv")]
+    E --> M{{"models/topic_full"}}
+    S --> C["categorize_topics.py"]
+    W --> C
+    V[("configs/topic_categories.txt")] --> C
+    C --> O[("topic_categories.csv")]
 ```
+
+`extract_topics.py` は「どんな話題があるか」を出すところまで。
+`categorize_topics.py` がそれを ①ゲーム要素 / ②品質・運営 / ③ビジネス条件 / 中身なし に仕分けます。
+需要スコアに合算するのは①だけで、③は阻害要因として別枠に持ちます（`docs/decisions.md` 2026-08-18）。
+
+`categorize_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます（土台パネルの顔ぶれを `tier` 列から取るため）。
 
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
 | `train_dapt.py` | DAPT（未ラベルレビューでMLM継続学習・ドメイン適応モデル作成） |
 | `extract_topics.py` | BERTopicによるトピック抽出（本番実行） |
+| `categorize_topics.py` | トピックの3分類＋中身なしの仕分け（ルール第一段） |
 
 **使用方法:**
 ```bash

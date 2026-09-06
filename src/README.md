@@ -100,6 +100,7 @@ flowchart LR
 | ファイル | 説明 |
 |---|---|
 | `topic.py` | BERTopicによるトピック抽出。ゲーム名除去・英語フィルタリング付き |
+| `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし） |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
@@ -107,6 +108,11 @@ flowchart LR
 - `remove_game_names(df, all_games, extra_words)` — ゲーム名・固有名詞の除去。
   範囲は「語 × ゲーム」で決める（2語以上のタイトルの並びと `configs/proper_nouns.txt` は
   全レビュー、タイトルを割った単語は自ゲームのレビューのみ）。→ `docs/decisions.md` 2026-09-06
+
+**主要関数（topic_category.py）:**
+- `load_category_words(path)` — 分類語彙を読む（`configs/topic_categories.txt`）
+- `classify_topic(keywords, words)` — トピック1件を仕分ける。どの語彙にも当たらなければ
+  ①ゲーム要素、複数の分類が同数で当たったら `ambiguous`（手動送り）
 
 ---
 
