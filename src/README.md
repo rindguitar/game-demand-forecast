@@ -104,7 +104,9 @@ flowchart LR
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
 - `extract_topics(texts, topic_model)` — トピック抽出実行
-- `remove_game_names(df)` — 自己言及問題を防ぐゲーム名除去
+- `remove_game_names(df, all_games, extra_words)` — ゲーム名・固有名詞の除去。
+  範囲は「語 × ゲーム」で決める（2語以上のタイトルの並びと `configs/proper_nouns.txt` は
+  全レビュー、タイトルを割った単語は自ゲームのレビューのみ）。→ `docs/decisions.md` 2026-09-06
 
 ---
 
