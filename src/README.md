@@ -100,7 +100,8 @@ flowchart LR
 | ファイル | 説明 |
 |---|---|
 | `topic.py` | BERTopicによるトピック抽出。ゲーム名除去・英語フィルタリング付き |
-| `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし） |
+| `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
+| `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
@@ -112,7 +113,12 @@ flowchart LR
 **主要関数（topic_category.py）:**
 - `load_category_words(path)` — 分類語彙を読む（`configs/topic_categories.txt`）
 - `classify_topic(keywords, words)` — トピック1件を仕分ける。どの語彙にも当たらなければ
-  ①ゲーム要素、複数の分類が同数で当たったら `ambiguous`（手動送り）
+  ①ゲーム要素、複数の分類が同数で当たったら `ambiguous`（手動送り）。
+  固有名詞は同数でも優先する（束ねる対象から確実に外すため）
+
+**主要関数（topic_bundle.py）:**
+- `load_tag_vocabulary(genres, tags)` — 台帳のジャンル列・タグ列から束ね先を作る（長い順）
+- `assign_bundle(keywords, vocabulary)` — 束ね先タグを1つ決める。当たらなければ `None`
 
 ---
 

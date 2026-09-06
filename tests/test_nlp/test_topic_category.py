@@ -12,6 +12,7 @@ from src.nlp.topic_category import (
     QUALITY,
     BUSINESS,
     CONTENTLESS,
+    PROPERNOUN,
     AMBIGUOUS,
     classify_topic,
     classify_topics,
@@ -27,6 +28,7 @@ def words():
         QUALITY: ['crash', 'crashes', 'bug', 'performance'],
         BUSINESS: ['price', 'dlc', 'dlcs', 'free game'],
         CONTENTLESS: ['best game', 'hours', 'recommend'],
+        PROPERNOUN: ['bungie', 'team cherry'],
     }
 
 
@@ -86,6 +88,21 @@ def test_classify_topic_plural_must_be_listed(words):
     """
     assert classify_topic('crashes only', words)[0] == QUALITY   # crashes は語彙にある
     assert classify_topic('bugs only', words)[0] == ELEMENT      # bugs は語彙に無い
+
+
+def test_classify_topic_propernoun_wins_over_tie(words):
+    """固有名詞は他と同数で当たっても曖昧にせず確定させる
+
+    束ねてはいけないものなので、ambiguous に落として取りこぼすと
+    その塊がタグの束に流れ込む。
+    """
+    assert classify_topic('bungie, price', words)[0] == PROPERNOUN
+
+
+def test_classify_topic_propernoun_phrase(words):
+    """語句の固有名詞も当たる（"cherry" 単体は語彙に入れない方針）"""
+    assert classify_topic('team cherry, cherry, thank team', words)[0] == PROPERNOUN
+    assert classify_topic('cherry blossom, tree', words)[0] == ELEMENT
 
 
 def test_classify_topics_keeps_order(words):

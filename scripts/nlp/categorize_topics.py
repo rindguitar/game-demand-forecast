@@ -29,6 +29,7 @@ from src.nlp.topic_category import (  # noqa: E402
     QUALITY,
     BUSINESS,
     CONTENTLESS,
+    PROPERNOUN,
     AMBIGUOUS,
     classify_topics,
     format_hits,
@@ -36,7 +37,7 @@ from src.nlp.topic_category import (  # noqa: E402
 )
 
 # 表示の並び順（要素を先頭に置く）
-CATEGORY_ORDER = [ELEMENT, QUALITY, BUSINESS, CONTENTLESS, AMBIGUOUS]
+CATEGORY_ORDER = [ELEMENT, QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN, AMBIGUOUS]
 
 
 def parse_args():

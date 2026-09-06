@@ -17,6 +17,7 @@ ELEMENT = 'element'
 QUALITY = 'quality'
 BUSINESS = 'business'
 CONTENTLESS = 'contentless'
+PROPERNOUN = 'propernoun'
 AMBIGUOUS = 'ambiguous'
 
 # 表示用の日本語名
@@ -25,11 +26,12 @@ CATEGORY_LABELS = {
     QUALITY: '②品質・運営',
     BUSINESS: '③ビジネス条件',
     CONTENTLESS: '中身なし',
+    PROPERNOUN: '固有名詞',
     AMBIGUOUS: '要手動判定',
 }
 
 # 設定ファイルに書ける見出し（[quality] など）
-_SECTIONS = (QUALITY, BUSINESS, CONTENTLESS)
+_SECTIONS = (QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN)
 
 
 def load_category_words(path: str) -> Dict[str, List[str]]:
@@ -78,7 +80,8 @@ def classify_topic(keywords: str,
 
     1. 分類ごとに、当たった語を数える
     2. 1つも当たらなければ ①ゲーム要素（語彙は「要素以外」を集めたものなので）
-    3. 最多の分類が1つに決まればそれ。同数で並んだら AMBIGUOUS（手動送り）
+    3. 固有名詞に当たっていればそれで確定（束ねる対象から確実に外すため）
+    4. 最多の分類が1つに決まればそれ。同数で並んだら AMBIGUOUS（手動送り）
 
     Returns:
         (分類の識別子, 分類ごとに当たった語)
@@ -87,6 +90,11 @@ def classify_topic(keywords: str,
     counts = {c: len(v) for c, v in hits.items() if v}
     if not counts:
         return ELEMENT, hits
+
+    # 固有名詞は当たった時点で確定させる。束ねてはいけないものなので、
+    # 他の分類と同数で並んで ambiguous に落ちると取りこぼす
+    if counts.get(PROPERNOUN):
+        return PROPERNOUN, hits
 
     top = max(counts.values())
     winners = [c for c, n in counts.items() if n == top]

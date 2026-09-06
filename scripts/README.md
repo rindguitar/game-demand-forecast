@@ -92,21 +92,27 @@ flowchart LR
     S --> C["categorize_topics.py"]
     W --> C
     V[("configs/topic_categories.txt")] --> C
-    C --> O[("topic_categories.csv")]
+    C --> O[("topic_categories.csv")] --> B["bundle_topics.py"]
+    B --> N[("topic_bundles.csv")]
 ```
 
 `extract_topics.py` は「どんな話題があるか」を出すところまで。
 `categorize_topics.py` がそれを ①ゲーム要素 / ②品質・運営 / ③ビジネス条件 / 中身なし に仕分けます。
 需要スコアに合算するのは①だけで、③は阻害要因として別枠に持ちます（`docs/decisions.md` 2026-08-18）。
 
-`categorize_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます（土台パネルの顔ぶれを `tier` 列から取るため）。
+`bundle_topics.py` は、週10件に届かない小さいトピックだけをSteamタグの語彙に寄せます。
+大きいトピックはそのまま残し、タグに寄らないものは「その他」に集約します（`docs/decisions.md` 2026-08-31）。
+
+`categorize_topics.py` と `bundle_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます
+（前者は土台パネルの顔ぶれを `tier` 列から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
 
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
 | `train_dapt.py` | DAPT（未ラベルレビューでMLM継続学習・ドメイン適応モデル作成） |
 | `extract_topics.py` | BERTopicによるトピック抽出（本番実行） |
-| `categorize_topics.py` | トピックの3分類＋中身なしの仕分け（ルール第一段） |
+| `categorize_topics.py` | トピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
+| `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
 
 **使用方法:**
 ```bash

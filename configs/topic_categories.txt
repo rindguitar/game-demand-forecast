@@ -8,6 +8,7 @@
 #   [quality]      ②品質・運営      … 不具合・性能・運営の対応・コミュニティの荒れ
 #   [business]     ③ビジネス条件    … 価格・課金モデル。需要量に合算せず阻害要因の別枠に置く
 #   [contentless]  中身なし          … 賞賛/罵倒・メタ言及・プレイ時間。需要の手がかりにならない
+#   [propernoun]   固有名詞          … 開発元・キャラ名・他タイトル。束ねる対象から外す
 #   （どれにも当たらない）①ゲーム要素 … 需要スコアの対象
 #
 # 語彙は 2026-09-06 の本番実行（455トピック）で、週10件以上の60トピックの
@@ -85,6 +86,16 @@ toxic
 toxicity
 toxic community
 harassment
+# 対戦相手がbot・調整（2026-09-06に①から移した分類漏れ）
+bots
+real players
+nerf
+nerfed
+buff
+buffed
+# 運営への不信
+spyware
+data collection
 
 [business]
 price
@@ -171,3 +182,39 @@ waste time
 lots stuff
 lots things
 entertaining
+# 好意の表明だけ（2026-09-06に①から移した分類漏れ）
+love game
+game love
+absolutely love
+# ミーム・スラング
+gooner
+gooners
+gooning
+goon
+# 意味を成していない断片
+heres thing
+thing heres
+
+[propernoun]
+# 束ねる対象から外すためのトピック単位の固有名詞。
+# レビュー本文から語を消す configs/proper_nouns.txt とは別物で、
+# こちらは「そのトピックごと、束ねる工程に載せない」ために使う。
+#
+# 2026-09-06 の本番実行（455トピック）でキーワードに残っていたものを拾った。
+# proper_nouns.txt と同じく、一般語と紛れる語は入れない
+#   例: "destiny"（運命）は入れず、同じトピックに出る "bungie" で拾う
+#       "cherry"（果物）は入れず、"team cherry" で拾う
+#       "spider"（蜘蛛の敵）は入れず、"spiderman" で拾う
+bungie
+wotc
+spiderman
+jonah jameson
+jameson
+deadpool
+jeff
+hornet
+pharloom
+team cherry
+elder scrolls
+silk song
+song silk
