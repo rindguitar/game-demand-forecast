@@ -4,8 +4,9 @@
 BERTopicを使用してゲームレビューからトピック（ゲーム要素）を抽出する。
 """
 
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Optional
 import pandas as pd
+import os
 import re
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
@@ -58,49 +59,122 @@ def filter_english_reviews(df: pd.DataFrame, text_column: str = 'review_text') -
     return df_english.drop(columns=['is_english'])
 
 
-def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text', game_name_column: str = 'game_name') -> pd.DataFrame:
+def load_proper_nouns(path: str) -> List[str]:
     """
-    各レビューから自ゲームのタイトル単語を除去
+    除去する固有名詞のリストを読む（1行1語・# はコメント）
 
-    自己言及問題（GTA Onlineのレビューに"gta online"が含まれる等）を防ぐため、
-    各レビューのgame_name列の単語をレビューテキストから除去する。
+    ロスター外の開発元名・タイトル名を置く。収集対象ゲームの名前は台帳から
+    自動で作れるので、ここには含めない。
+    """
+    if not path:
+        return []
+    if not os.path.exists(path):
+        # 黙って空を返すと「除去したつもり」で進んでしまうので必ず知らせる
+        print(f"⚠️ 固有名詞のファイルが見つかりません: {path}（追加の除去は行われません）")
+        return []
+    with open(path, encoding='utf-8') as f:
+        return [line.strip() for line in f
+                if line.strip() and not line.lstrip().startswith('#')]
 
-    除去フィルター:
-        - 2文字以下の単語（"v", "of", "a"等）
+
+def _title_tokens(game_name: str) -> List[str]:
+    """ゲーム名を英数字の並びに割る（"Magic: The Gathering Arena" → magic/the/gathering/arena）"""
+    return re.findall(r'[a-zA-Z0-9]+', game_name.lower())
+
+
+def _phrase_pattern(name: str, min_tokens: int = 1) -> Optional[str]:
+    """名前を「語の並び」としてだけ一致させる正規表現を作る
+
+    語の間は記号でも空白でもよいので、"Magic: The Gathering Arena" と
+    "magic the gathering arena" の両方に当たる。単語がバラバラに出てくる
+    ケース（"magic" 単体）には当たらない。
+
+    min_tokens 未満の語数の名前は None を返す。1語のタイトルは並びが単語と
+    同じになるため、自動で全レビューから消すと一般語を巻き添えにする
+    （実測: predecessor は1,815回中1,108回が Silksong の「前作」の意味）。
+    """
+    tokens = _title_tokens(name)
+    if len(tokens) < min_tokens:
+        return None
+    return r'\b' + r'\W+'.join(re.escape(t) for t in tokens) + r'\b'
+
+
+def _replace_patterns(series: pd.Series, patterns: List[str]) -> pd.Series:
+    """複数の正規表現をまとめて1回で消す（何十回も全文を走査すると桁で遅くなる）"""
+    if not patterns:
+        return series
+    combined = '(?:' + '|'.join(patterns) + ')'
+    return (series.astype(str)
+            .str.replace(combined, ' ', regex=True, case=False)
+            .str.replace(r'\s+', ' ', regex=True)
+            .str.strip())
+
+
+def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
+                      game_name_column: str = 'game_name',
+                      all_games: bool = False,
+                      extra_words: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    レビューからゲーム名・固有名詞を除去する
+
+    除去の範囲は「語」ではなく「語 × ゲーム」で決める。同じ語がゲームによって
+    固有名詞にも内容語にもなるため（legacy は GTA では版名、Civ では歴史の遺産）。
+    詳細は docs/decisions.md 2026-09-06。
+
+    1. 全レビューから消すもの: 2語以上のタイトルの**並び**（"magic the gathering arena"）と
+       extra_words。並びでしか一致しないので、"magic" 単体は内容語として残る。
+       1語のタイトル（Starfield / Predecessor）は自動では消さない。消したいものは
+       人が extra_words（configs/proper_nouns.txt）に書く
+    2. 自分のゲームのレビューからだけ消すもの: タイトルを単語に割ったもの
+       （MTGのレビューでだけ "magic" "arena" が消え、他ゲームでは残る）
+
+    all_games=False のときは 2 だけを行う。
+
+    除去フィルター（2 のみ）:
+        - 3文字以下の単語（"v", "of", "the"等）
         - 数字のみの単語（"2077", "3", "5"等）
 
     Args:
         df: レビューデータフレーム
         text_column: テキストカラム名
         game_name_column: ゲーム名カラム名
+        all_games: True で 1 と 2 の両方、False で 2 のみ
+        extra_words: ロスター外の固有名詞（開発元名など）。1 として扱う
 
     Returns:
-        ゲーム名除去済みのデータフレーム
+        除去済みのデータフレーム
     """
     df_copy = df.copy()
+    names = [n for n in df_copy[game_name_column].dropna().unique()]
 
-    def _get_game_words(game_name: str) -> List[str]:
-        """ゲーム名から除去対象の単語リストを生成"""
-        words = re.findall(r'[a-zA-Z0-9]+', game_name.lower())
-        return [w for w in words if len(w) > 3 and not w.isnumeric()]
+    # 1. 全レビューから、完全なタイトルの並びと extra_words を消す
+    if all_games or extra_words:
+        # 長い名前から先に消す（"Hollow Knight: Silksong" を "Silksong" より先に処理する）
+        titles = sorted((str(n) for n in names), key=len, reverse=True) if all_games else []
+        extras = sorted(extra_words or [], key=len, reverse=True)
+        patterns = [p for p in
+                    ([_phrase_pattern(t, min_tokens=2) for t in titles]
+                     + [_phrase_pattern(e) for e in extras])
+                    if p]
+        df_copy[text_column] = _replace_patterns(df_copy[text_column], patterns)
+        print(f"全レビューからの除去完了: 2語以上のタイトル{len(titles)}件中"
+              f"{sum(1 for t in titles if _phrase_pattern(t, min_tokens=2))}件"
+              f" + 固有名詞{len(extras)}語")
 
-    def _remove_words(text: str, words: List[str]) -> str:
-        """テキストから単語リストを除去"""
-        for word in words:
-            text = re.sub(rf'\b{re.escape(word)}\b', '', text, flags=re.IGNORECASE)
-        return text.strip()
-
+    # 2. 各ゲームのレビューから、自分のタイトルを割った単語を消す
+    removed_per_game = {}
     for game_name, group_idx in df_copy.groupby(game_name_column).groups.items():
-        game_words = _get_game_words(game_name)
-        if not game_words:
+        words = [w for w in _title_tokens(str(game_name))
+                 if len(w) > 3 and not w.isnumeric()]
+        if not words:
             continue
-        df_copy.loc[group_idx, text_column] = df_copy.loc[group_idx, text_column].apply(
-            lambda text: _remove_words(str(text), game_words)
-        )
+        removed_per_game[game_name] = words
+        patterns = [rf'\b{re.escape(w)}\b' for w in sorted(words, key=len, reverse=True)]
+        df_copy.loc[group_idx, text_column] = _replace_patterns(
+            df_copy.loc[group_idx, text_column], patterns)
 
-    print(f"ゲーム名除去完了")
-    for game_name in df_copy[game_name_column].unique():
-        words = _get_game_words(game_name)
+    print(f"自ゲーム名の除去完了: {len(removed_per_game)}本")
+    for game_name, words in removed_per_game.items():
         print(f"  {game_name}: {words}")
 
     return df_copy
@@ -215,6 +289,68 @@ def extract_topics(
     return topic_model, topics, probabilities
 
 
+def assign_topics(
+    topic_model: BERTopic,
+    texts: List[str],
+    verbose: bool = True
+) -> Tuple[List[int], List[float]]:
+    """
+    学習済みモデルで、テキストにトピックを割り当てる（transform）
+
+    学習（fit）と割り当て（transform）を分けるのは、次元削減とクラスタリングが件数に
+    弱いため。重い処理は一部のデータで済ませ、割り当ては「既にできている塊のどれに
+    近いか」を見るだけなので全件に掛けられる（詳細は Wiki「トピック抽出」）。
+
+    Args:
+        topic_model: 学習済みBERTopicモデル
+        texts: 割り当て対象のテキスト
+        verbose: 詳細ログ表示
+
+    Returns:
+        (トピックIDのリスト, 確率のリスト)
+    """
+    if verbose:
+        print(f"トピック割り当て（transform）: {len(texts):,}件")
+
+    topics, probabilities = topic_model.transform(texts)
+    topics = [int(t) for t in topics]
+
+    if verbose:
+        outlier = topics.count(-1)
+        print(f"割り当て完了: {len(set(topics) - {-1})}トピック / "
+              f"Outlier {outlier:,}件 ({outlier / len(topics) * 100:.1f}%)")
+
+    return topics, probabilities
+
+
+def save_topic_model(
+    topic_model: BERTopic,
+    path: str,
+    embedding_model_name: str = 'all-MiniLM-L6-v2'
+) -> None:
+    """
+    学習済みモデルを保存する
+
+    埋め込みモデルは本体を書き出さず名前だけ記録する（サイズが大きく、
+    名前があれば再取得できるため）。
+    """
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    topic_model.save(
+        path,
+        serialization='safetensors',
+        save_ctfidf=True,
+        save_embedding_model=embedding_model_name,
+    )
+
+
+def load_topic_model(
+    path: str,
+    embedding_model_name: str = 'all-MiniLM-L6-v2'
+) -> BERTopic:
+    """保存済みモデルを読み込む（再学習を避けるため）"""
+    return BERTopic.load(path, embedding_model=embedding_model_name)
+
+
 def get_topic_info(topic_model: BERTopic, verbose: bool = True) -> pd.DataFrame:
     """
     トピック情報を取得
@@ -327,7 +463,7 @@ def print_topic_summary(
 
         # サンプルレビュー
         topic_reviews = [texts[i] for i, t in enumerate(topics) if t == topic_id]
-        print(f"│ サンプル:")
+        print("│ サンプル:")
         for i, review in enumerate(topic_reviews[:sample_reviews]):
             # レビューの最初の80文字を表示
             review_text = review.replace('\n', ' ')[:80]

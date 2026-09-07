@@ -7,7 +7,8 @@
 ```
 tests/
 ├── test_data/      # データ収集・前処理のテスト
-└── test_nlp/       # NLP処理のテスト
+├── test_nlp/       # NLP処理のテスト
+└── test_visualization/ # 可視化のテスト
 ```
 
 ---
@@ -34,6 +35,8 @@ flowchart LR
     T4["test_sentiment.py"] --> M3["src/nlp/sentiment.py"]
     T5["test_evaluation.py"] --> M4["src/nlp/evaluation.py"]
     T6["test_topic.py"] --> M5["src/nlp/topic.py"]
+    T7["test_topic_category.py"] --> M6["src/nlp/topic_category.py"]
+    T8["test_topic_bundle.py"] --> M7["src/nlp/topic_bundle.py"]
 ```
 
 ### テストが無いモジュール
@@ -78,7 +81,11 @@ make test-topic     # トピック抽出テストのみ
 |---|---|---|
 | `test_sentiment.py` | `src/nlp/sentiment.py` | 感情分析推論の動作確認 |
 | `test_evaluation.py` | `src/nlp/evaluation.py` | 評価指標（Accuracy/F1等）の計算確認 |
-| `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリングの動作確認 |
+| `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリング・ゲーム名除去の動作確認 |
+| `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定） |
+| `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
+| `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出 |
+| `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
 
 ---
 

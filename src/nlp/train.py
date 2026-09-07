@@ -207,7 +207,7 @@ def train_model(
             print(f"⚠️  No improvement ({patience_counter}/{patience})")
 
             if patience_counter >= patience:
-                print(f"\n🛑 Early stopping triggered!")
+                print("\n🛑 Early stopping triggered!")
                 break
 
     # ベストmodelを読み込み

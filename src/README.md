@@ -8,7 +8,7 @@
 src/
 ├── data/           # データ収集・前処理
 ├── nlp/            # 自然言語処理（感情分析・トピック抽出）
-├── timeseries/     # 時系列予測（実装予定）
+├── timeseries/     # 週次時系列の作成・時系列予測
 ├── integration/    # NLP + 時系列の統合（実装予定）
 ├── utils/          # ユーティリティ（実装予定）
 └── visualization/  # 可視化
@@ -100,17 +100,47 @@ flowchart LR
 | ファイル | 説明 |
 |---|---|
 | `topic.py` | BERTopicによるトピック抽出。ゲーム名除去・英語フィルタリング付き |
+| `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
+| `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
 - `extract_topics(texts, topic_model)` — トピック抽出実行
-- `remove_game_names(df)` — 自己言及問題を防ぐゲーム名除去
+- `remove_game_names(df, all_games, extra_words)` — ゲーム名・固有名詞の除去。
+  範囲は「語 × ゲーム」で決める（2語以上のタイトルの並びと `configs/proper_nouns.txt` は
+  全レビュー、タイトルを割った単語は自ゲームのレビューのみ）。→ `docs/decisions.md` 2026-09-06
+
+**主要関数（topic_category.py）:**
+- `load_category_words(path)` — 分類語彙を読む（`configs/topic_categories.txt`）
+- `classify_topic(keywords, words)` — トピック1件を仕分ける。どの語彙にも当たらなければ
+  ①ゲーム要素、複数の分類が同数で当たったら `ambiguous`（手動送り）。
+  固有名詞は同数でも優先する（束ねる対象から確実に外すため）
+
+**主要関数（topic_bundle.py）:**
+- `load_tag_vocabulary(genres, tags)` — 台帳のジャンル列・タグ列から束ね先を作る（長い順）
+- `assign_bundle(keywords, vocabulary)` — 束ね先タグを1つ決める。当たらなければ `None`
 
 ---
 
-## timeseries/ — 時系列予測（実装予定）
+## timeseries/ — 週次時系列の作成・時系列予測
 
-NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。
+NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。予測モデル（Prophet等）は実装予定。
+
+| ファイル | 説明 |
+|---|---|
+| `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・期待ポジ率・参加ゲーム数） |
+
+充足度は**実際のポジ率とあわせて「期待ポジ率」も出します**。`voted_up` はゲーム全体への評価なので、
+トピックの絶対値だとそのゲームの評判を読んでしまうためです（→ `docs/decisions.md` 2026-09-07）。
+差の `positive_rate_gap` が要素そのものの効き方になります。
+
+**可視化は `src/visualization/timeseries_plots.py`**（`plot_series_grid` / `plot_positive_rate_grid` / `plot_overview`）。充足度の配色はオレンジ ↔ アクア。
+
+**主要関数（weekly.py）:**
+- `add_week_column(df)` — UNIX秒からその週の月曜を指す列を足す
+- `trim_partial_weeks(df)` — 端の部分週を落とす（7日そろっていない週は件数が落ちて誤読される）
+- `build_weekly_series(df, ...)` — 単位 × 週の表を作る。週の軸は連続した週で埋め、
+  各単位の初出より前は欠測にする（需要ゼロではなく観測対象外のため）
 
 ---
 
