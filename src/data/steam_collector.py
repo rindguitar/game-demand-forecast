@@ -162,7 +162,7 @@ def is_valid_english_review(text: str, min_length: int = 20, lang_confidence: fl
     # 4. langdetectの信頼スコアチェック（閾値未満は除外して再収集）
     try:
         langs = detect_langs(text)
-        en_score = next((l.prob for l in langs if l.lang == 'en'), 0.0)
+        en_score = next((lang.prob for lang in langs if lang.lang == 'en'), 0.0)
         if en_score < lang_confidence:
             return False
     except LangDetectException:
@@ -423,7 +423,8 @@ def get_steam_reviews(
         raise ValueError(f"Invalid language: {language}. Must be 'english', 'japanese', or 'all'")
 
     if review_type not in ['positive', 'negative', 'all']:
-        raise ValueError(f"Invalid review_type: {review_type}. Must be 'positive', 'negative', or 'all'")
+        raise ValueError(f"Invalid review_type: {review_type}. "
+                         "Must be 'positive', 'negative', or 'all'")
 
     if num <= 0:
         raise ValueError(f"Invalid num: {num}. Must be positive")

@@ -111,12 +111,11 @@ test-ts:
 	docker compose exec dev pytest tests/test_timeseries/ -v
 
 lint:
-	flake8 src/ --max-line-length=100
-	pylint src/ --max-line-length=100 --disable=C0114,C0115,C0116
+	docker compose exec dev flake8 src/
 
 format:
-	black src/ tests/
-	isort src/ tests/
+	docker compose exec dev black src/ tests/
+	docker compose exec dev isort src/ tests/
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

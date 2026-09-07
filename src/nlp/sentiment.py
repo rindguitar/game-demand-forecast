@@ -7,7 +7,7 @@ Hugging Face Transformersの事前学習済みモデルを使用して
 
 from typing import List, Dict, Union
 import torch
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from transformers import pipeline
 
 
 def analyze_sentiment(

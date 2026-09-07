@@ -45,6 +45,6 @@ transformers-interpret  # モデル解釈性（Integrated Gradients）
 # - ipykernel         # Jupyter kernel
 pytest              # テストフレームワーク
 # - black             # コードフォーマッター
-# - flake8            # Linter
+flake8              # Linter（make lint。設定は setup.cfg）
 # - pylint            # Linter
 # - isort             # import整理

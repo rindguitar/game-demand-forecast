@@ -8,11 +8,11 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-from typing import Optional
-from src.nlp.sentiment_db import (
+import matplotlib.pyplot as plt  # noqa: E402
+import seaborn as sns  # noqa: E402
+import pandas as pd  # noqa: E402
+from typing import Optional  # noqa: E402
+from src.nlp.sentiment_db import (  # noqa: E402
     get_sentiment_stats,
     get_overall_stats,
     get_game_list,
@@ -180,7 +180,7 @@ def plot_sentiment_timeseries(
              marker='o', linewidth=2, markersize=4, color='#2ecc71', label='Positive Rate')
     ax1.axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='50% baseline')
     ax1.fill_between(timeseries['date'], 0, timeseries['positive_rate'],
-                      alpha=0.2, color='#2ecc71')
+                     alpha=0.2, color='#2ecc71')
 
     ax1.set_ylabel('Positive Rate (%)', fontsize=12, weight='bold')
     ax1.set_title(title, fontsize=14, weight='bold', pad=15)
@@ -197,7 +197,7 @@ def plot_sentiment_timeseries(
 
     ax2.set_xlabel('Date', fontsize=12, weight='bold')
     ax2.set_ylabel('Review Count', fontsize=12, weight='bold')
-    ax2.set_title(f'Review Count Over Time', fontsize=14, weight='bold', pad=15)
+    ax2.set_title('Review Count Over Time', fontsize=14, weight='bold', pad=15)
     ax2.legend(fontsize=10)
     ax2.grid(alpha=0.3, axis='y')
 
@@ -234,7 +234,8 @@ if __name__ == '__main__':
 
     # 全ゲームの月別時系列
     print("\n3. 全ゲーム月別時系列")
-    plot_sentiment_timeseries(interval='month', save_path='outputs/sentiment_timeseries_monthly.png')
+    plot_sentiment_timeseries(interval='month',
+                              save_path='outputs/sentiment_timeseries_monthly.png')
 
     # 特定ゲームの日別時系列（Grand Theft Auto V）
     print("\n4. Grand Theft Auto V 日別時系列")

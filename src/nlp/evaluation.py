@@ -83,9 +83,9 @@ def print_evaluation_metrics(results: Dict[str, float], language: str = "モデ�
 
     # confusion matrixを表示
     cm = results['confusion_matrix']
-    print(f"\n混同行列（Confusion Matrix）:")
-    print(f"                 Predicted")
-    print(f"                 Neg    Pos")
+    print("\n混同行列（Confusion Matrix）:")
+    print("                 Predicted")
+    print("                 Neg    Pos")
     print(f"Actual  Neg    [{cm[0][0]:4d}] [{cm[0][1]:4d}]")
     print(f"        Pos    [{cm[1][0]:4d}] [{cm[1][1]:4d}]")
 
@@ -250,6 +250,6 @@ def print_detailed_classification_report(
     # classごとのaccuracy
     class_stats = calculate_error_rate_by_class(y_true, y_pred)
 
-    print(f"\nクラス別正解率:")
+    print("\nクラス別正解率:")
     for class_name, (correct, total, acc) in class_stats.items():
         print(f"  {class_name.capitalize()}: {correct}/{total} = {acc:.2%}")

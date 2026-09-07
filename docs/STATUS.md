@@ -93,6 +93,8 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 
 **decisions.md に7件追記**（`9a96814`）。固有名詞除去の判断がそれまで一度も記録されていなかった（grep 0件）。根拠は `topic.py` の docstring だけで、実装とずれても気づけない状態だった。
 
+**`make lint` を動く状態にした**。flake8 が requirements.txt でコメントアウトされていて、しかも `lint` だけコンテナ外で走る定義だった（`test` は中）。コンテナ内で走るよう揃え、設定は `setup.cfg` に出し、`src/` の指摘20件を修正。**イメージの再ビルドが必要**（flake8 を requirements に追加したため）。
+
 **Wikiを更新**（[Confounding](https://github.com/rindguitar/game-demand-forecast/wiki/Confounding) / [Mean-vs-Median](https://github.com/rindguitar/game-demand-forecast/wiki/Mean-vs-Median) / [Seasonality](https://github.com/rindguitar/game-demand-forecast/wiki/Seasonality) を新規作成）。密度のページに「平均ではなく中央値で測る」節、パネル設計に「期間の外で始まっただけでは足りない」節を追加。ドキュメントマップを47ページ107本で作り直し、**孤立3ページを検出**（Cloud-GPU-Analysis / Game-Review-Datasets / Language-Selection-Analysis）。
 
 **ドキュメント構成をテンプレート更新に合わせて再配置**。`.claude/rules/` に mermaid / readme / wiki を追加、`docs/mermaid-guide.md` を廃止（中身は mermaid.md と wiki.md に吸収）、`docs/experiments.md` を新設して実測値を集約。
@@ -240,7 +242,8 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 - **`src/visualization/sentiment_plots.py` が実行できない**。存在しない `src/nlp/sentiment_db.py` をimportしている。どのスクリプトからも呼ばれていないため実害は出ていない
 - **`src/data/dataset_split.py` がどのスクリプトからも呼ばれていない**。`train_sentiment.py` は自前で `train_test_split` を呼んでいる
 - **`src/nlp/` の中核3ファイル（`model.py` / `train.py` / `dataset.py`）にテストが無い**
-- **`make lint` が動かない**。flake8 がコンテナにもホストにも入っていない
+- **`make lint` は `src/` だけが対象**。`scripts/` と `tests/` には253件の指摘が残っている（F541 が101件・E402 が93件・E501 が37件など）。今回は `make lint` を動く状態にすることを目的にしたので、既存スクリプトの整理は別途
+- **`make format`（black / isort）はまだ動かない**。requirements.txt でコメントアウトされたまま。入れるとフォーマット差分が大量に出るので、やるなら単独のコミットで
 
 ### ドキュメント
 

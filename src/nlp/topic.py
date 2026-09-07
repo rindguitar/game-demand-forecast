@@ -4,7 +4,7 @@
 BERTopicを使用してゲームレビューからトピック（ゲーム要素）を抽出する。
 """
 
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Optional
 import pandas as pd
 import os
 import re
@@ -463,7 +463,7 @@ def print_topic_summary(
 
         # サンプルレビュー
         topic_reviews = [texts[i] for i, t in enumerate(topics) if t == topic_id]
-        print(f"│ サンプル:")
+        print("│ サンプル:")
         for i, review in enumerate(topic_reviews[:sample_reviews]):
             # レビューの最初の80文字を表示
             review_text = review.replace('\n', ' ')[:80]

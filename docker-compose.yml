@@ -15,6 +15,7 @@ services:
       - ./tests:/app/tests
       - ./models:/app/models
       - ./Makefile:/app/Makefile
+      - ./setup.cfg:/app/setup.cfg   # flake8 の設定（make lint）
     ports:
       - "8888:8888"
     environment:
