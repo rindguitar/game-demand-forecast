@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-09-07（作業のたびに更新）
+最終更新: 2026-09-07（作業のたびに更新）／ 直近: PR #36 をマージし Issue #32 をクローズ
 
 実測した数字は `docs/experiments.md` が一次ソース。ここには現在地だけを置く。
 
@@ -160,7 +160,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 
 2. **土台の定義に N 週の基準を入れるか決める**（保留中） — DAVE THE DIVER（10週前）と MTG Arena（15週前）の発売減衰期がパネルに入っている。Prophet を回して、減衰期が予測をどれだけ壊すかを見てから決める
 
-3. **PRを出してマージ** — `feature/timeseries-collector` にコミットが溜まっている（PR未作成）
+（[PR #36](https://github.com/rindguitar/game-demand-forecast/pull/36) をマージ済み。Issue #32 もクローズ。次の作業は `main` から新しいブランチを切ること）
 
 ### 到達率が32.1%で頭打ちになっている件
 
