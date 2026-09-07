@@ -7,7 +7,7 @@ docs/decisions.md 2026-08-18「トピックを3分類し、仕分けは ルー�
 処理の流れ:
   1. トピック統計（topic_statistics.csv）を読む
   2. 分類語彙（configs/topic_categories.txt）で各トピックを仕分ける
-  3. レビュー本体から、パネルごとの週あたり件数とゲーム集中度を測る
+  3. レビュー本体から、パネルごとの週あたり件数（中央値）とゲーム集中度を測る
   4. 分類 × パネル到達 の内訳を表示し、CSVに書き出す
 
 使い方:
@@ -23,6 +23,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+from src.timeseries.weekly import add_week_column, trim_partial_weeks  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
     CATEGORY_LABELS,
     ELEMENT,
@@ -54,7 +55,7 @@ def parse_args():
     parser.add_argument('--output', default=None,
                         help='出力CSV（未指定なら統計と同ディレクトリの topic_categories.csv）')
     parser.add_argument('--min-per-week', type=float, default=10.0,
-                        help='時系列に乗せる下限（週あたり件数）')
+                        help='時系列に乗せる下限（週あたり件数の中央値）')
     parser.add_argument('--backbone-tier', default='土台',
                         help='土台パネルとして扱う tier の値')
     parser.add_argument('--exclude-game', action='append', default=None,
@@ -64,11 +65,22 @@ def parse_args():
     return parser.parse_args()
 
 
+def weekly_median(data, week_axis):
+    """トピックごとに「週あたり件数の中央値」を出す
+
+    平均だと発売スパイク型のトピックが密度十分に見えてしまう
+    （実測: metroidvania は平均16.7件/週だが中央値は1.0件）。
+    """
+    table = data.groupby(['topic_id', 'week']).size().unstack(fill_value=0)
+    return table.reindex(columns=week_axis, fill_value=0).median(axis=1)
+
+
 def measure_panels(reviews_path, games_path, backbone_tier, exclude_games):
     """レビュー本体から、パネルごとの週あたり件数とゲーム集中度を測る"""
-    df = pd.read_csv(reviews_path, usecols=['game_name', 'timestamp_created', 'topic_id'])
-    df['date'] = pd.to_datetime(df['timestamp_created'], unit='s')
-    weeks = (df['date'].max() - df['date'].min()).days / 7
+    df = add_week_column(pd.read_csv(reviews_path,
+                                     usecols=['game_name', 'timestamp_created', 'topic_id']))
+    df = trim_partial_weeks(df)   # 端の部分週は件数が落ちるので週として数えない
+    week_axis = pd.date_range(df['week'].min(), df['week'].max(), freq='W-MON')
     assigned = df[df['topic_id'] != -1]
 
     grouped = assigned.groupby('topic_id')['game_name']
@@ -78,7 +90,8 @@ def measure_panels(reviews_path, games_path, backbone_tier, exclude_games):
         'top1_share': grouped.apply(lambda s: s.value_counts(normalize=True).iloc[0]),
         'top1_game': grouped.apply(lambda s: s.value_counts().index[0]),
     })
-    panels['per_week_all'] = panels['count_all'] / weeks
+    panels['mean_per_week_all'] = panels['count_all'] / len(week_axis)
+    panels['per_week_all'] = weekly_median(assigned, week_axis)
 
     # 土台パネル（tier が backbone_tier のゲームから、除外指定を引いたもの）
     games = pd.read_csv(games_path)
@@ -87,10 +100,11 @@ def measure_panels(reviews_path, games_path, backbone_tier, exclude_games):
     bb = assigned[assigned['game_name'].isin(backbone)]
     panels['count_backbone'] = bb['topic_id'].value_counts()
     panels['count_backbone'] = panels['count_backbone'].fillna(0).astype(int)
-    panels['per_week_backbone'] = panels['count_backbone'] / weeks
+    panels['per_week_backbone'] = weekly_median(bb, week_axis).reindex(panels.index).fillna(0)
 
     totals = {'all_reviews': len(df), 'assigned': len(assigned),
-              'backbone_assigned': len(bb), 'backbone_games': backbone, 'weeks': weeks}
+              'backbone_assigned': len(bb), 'backbone_games': backbone,
+              'weeks': len(week_axis)}
     return panels, totals
 
 
@@ -162,7 +176,8 @@ def main():
     # 6. 書き出す
     output = args.output or os.path.join(os.path.dirname(args.stats), 'topic_categories.csv')
     columns = ['topic_id', 'category', 'keywords', 'count', 'games', 'top1_share', 'top1_game',
-               'per_week_all', 'per_week_backbone', 'reaches_all', 'reaches_backbone', 'matched']
+               'per_week_all', 'mean_per_week_all', 'per_week_backbone',
+               'reaches_all', 'reaches_backbone', 'matched']
     stats.sort_values('count', ascending=False)[columns].to_csv(output, index=False)
     print(f"\n✅ 出力: {output}")
 

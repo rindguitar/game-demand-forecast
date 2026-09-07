@@ -8,6 +8,7 @@
 scripts/
 ├── collect/            # データ収集
 ├── nlp/                # NLP本番実行
+├── timeseries/         # 週次時系列の作成
 ├── misclassification/  # 誤分類の分析パイプライン
 ├── evaluation/         # モデル評価・比較・多シード検証
 ├── learning_curve/     # データ量と精度の関係
@@ -124,6 +125,40 @@ make extract-topics        # トピック抽出
 ```
 
 `train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。
+
+---
+
+## timeseries/ — 週次時系列の作成（Phase 6）
+
+仕分け済みのトピックから、週次の時系列データを作ります。
+
+```mermaid
+flowchart LR
+    O[("topic_categories.csv")] --> S["build_weekly_series.py"]
+    W[("reviews_timeseries<br/>_with_topics.csv")] --> S
+    G[("games.csv")] --> S
+    S --> A[("weekly_series_all24.csv")]
+    S --> B[("weekly_series_backbone13.csv")]
+```
+
+パネルを2枚作ります（`docs/decisions.md` 2026-09-05）。
+
+| パネル | 顔ぶれ | 使い方 |
+|---|---|---|
+| `backbone13` | 期間中に発売が無い13本 | **絶対数**で引ける。主軸 |
+| `all24` | 全24本 | 参加ゲームが入れ替わるので**シェア**で見る |
+
+出力は縦長で、1行が「単位 × 週」です。列は `count`（言及数）/ `share`（その週の総言及数に対する割合）/
+`positive_rate`（充足度＝ポジ率）/ `games`（参加ゲーム数）/ `total`（その週の総言及数）。
+
+| ファイル | 説明 |
+|---|---|
+| `build_weekly_series.py` | 週次時系列の作成と、系列の健全性の点検 |
+
+**使用方法:**
+```bash
+docker compose exec dev python scripts/timeseries/build_weekly_series.py
+```
 
 ---
 

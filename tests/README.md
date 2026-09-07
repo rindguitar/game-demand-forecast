@@ -83,6 +83,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリング・ゲーム名除去の動作確認 |
 | `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定） |
 | `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
+| `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出 |
 
 ---
 
