@@ -93,6 +93,8 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 
 **decisions.md に7件追記**（`9a96814`）。固有名詞除去の判断がそれまで一度も記録されていなかった（grep 0件）。根拠は `topic.py` の docstring だけで、実装とずれても気づけない状態だった。
 
+**Wikiを更新**（[Confounding](https://github.com/rindguitar/game-demand-forecast/wiki/Confounding) / [Mean-vs-Median](https://github.com/rindguitar/game-demand-forecast/wiki/Mean-vs-Median) / [Seasonality](https://github.com/rindguitar/game-demand-forecast/wiki/Seasonality) を新規作成）。密度のページに「平均ではなく中央値で測る」節、パネル設計に「期間の外で始まっただけでは足りない」節を追加。ドキュメントマップを47ページ107本で作り直し、**孤立3ページを検出**（Cloud-GPU-Analysis / Game-Review-Datasets / Language-Selection-Analysis）。
+
 **ドキュメント構成をテンプレート更新に合わせて再配置**。`.claude/rules/` に mermaid / readme / wiki を追加、`docs/mermaid-guide.md` を廃止（中身は mermaid.md と wiki.md に吸収）、`docs/experiments.md` を新設して実測値を集約。
 
 ### 2026-09-05: トピック抽出の実装と試走
@@ -242,6 +244,7 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 
 ### ドキュメント
 
+- **Wikiに孤立ページが3つある**（Cloud-GPU-Analysis / Game-Review-Datasets / Language-Selection-Analysis）。Home 以外から辿り着けない状態
 - 予定表（Phase 0）の `docs/requirements.md` / `docs/design.md` が23週間未作成。需要スコアの定義が固まってきたので、書ける材料は揃いつつある
 - Reddit の採用中止が decisions.md に未記録（`requirements.txt` の1行コメントのみが根拠）
 - Issue #30（多ゲーム・少レビュー）は時系列フェーズが一区切りしてから着手
