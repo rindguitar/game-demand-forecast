@@ -7,7 +7,8 @@
 ```
 tests/
 ├── test_data/      # データ収集・前処理のテスト
-└── test_nlp/       # NLP処理のテスト
+├── test_nlp/       # NLP処理のテスト
+└── test_visualization/ # 可視化のテスト
 ```
 
 ---
@@ -84,6 +85,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定） |
 | `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出 |
+| `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
 
 ---
 

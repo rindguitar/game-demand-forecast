@@ -23,6 +23,24 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 
 ## 前回やったこと
 
+### 2026-09-07: 折れ線グラフにして、年次季節性を発見した
+
+`src/visualization/timeseries_plots.py` と `scripts/timeseries/plot_weekly_series.py` を追加。
+1枚に線を重ねず系列ごとに小さい図を並べる形にした（`data/timeseries/plots/`）。
+
+**描いて分かったこと**
+
+- **動きのある系列とほぼ平坦な系列が分かれた**。`hunting`（年2回の山・振幅6倍）`dlcs`（規則的な山）
+  `civs`（2025半ばから水準が半減）は動いている。`cards` `free` `headset` `friends` `toxic` はほぼ平坦
+- **充足度（ポジ率）が需要スコアの設計どおり機能した**。`cards`（MTG）は一貫して45〜60%で
+  パネル平均80%を大きく下回る＝**満たされていない需要**。`hunting` は一貫して90%台＝満たされている。
+  `headset`（VRChat）は2025後半からオレンジに転落＝悪化の兆し
+- **⚠️ 年次季節性が検出できた**（→ `docs/decisions.md` 2026-09-07）。2024 vs 2025 の月別相関 **r = +0.88**。
+  2026-08-31 の「検出できず（r=+0.36）」を撤回した。前回はシェアで測っていたため、
+  全体が同時に上がる季節性が分母に打ち消されていた
+- **⚠️ 土台の定義に穴**。DAVE THE DIVER（ウィンドウ開始の10週前に発売）と MTG Arena（15週前）の
+  発売減衰期がパネルに入っている。t2 は最初の週が950件で以降は50件以下
+
 ### 2026-09-07: 週次時系列を引いた（Phase 6）
 
 `src/timeseries/weekly.py` と `scripts/timeseries/build_weekly_series.py` を追加。実際に引いてみて**3つ直した**。
@@ -131,10 +149,11 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 
 ## 次の一手（優先順）
 
-1. **引いた系列を目で見る** — 数字の点検（0件週・欠測・中央値）は通ったが、**まだ一度も描いていない**。株価チャート型（2026-08-18）にする前に、土台13本の11系列がどう動いているかを見る。ここで「そもそも動きがあるのか」が分かる
+1. **Phase 7: Prophet を回す** — 材料は揃った。**年次季節性を入れる**こと（2026-09-07 に検出。前回の結論のままだと外していた）。動きのある `hunting` `dlcs` `civs` から始めるのが素直
 
-2. **PRを出してマージ** — `feature/timeseries-collector` にコミットが溜まっている（PR未作成）
-3. Phase 7（Prophet実装）
+2. **土台の定義に N 週の基準を入れるか決める**（保留中） — DAVE THE DIVER（10週前）と MTG Arena（15週前）の発売減衰期がパネルに入っている。Prophet を回して、減衰期が予測をどれだけ壊すかを見てから決める
+
+3. **PRを出してマージ** — `feature/timeseries-collector` にコミットが溜まっている（PR未作成）
 
 ### 到達率が32.1%で頭打ちになっている件
 
@@ -147,6 +166,7 @@ docker compose exec dev python scripts/nlp/categorize_topics.py
 docker compose exec dev python scripts/nlp/categorize_topics.py --show propernoun
 docker compose exec dev python scripts/nlp/bundle_topics.py --show
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
+docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 ```
 
 ### 未実施のまま残っている測定
@@ -187,6 +207,8 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 - **時系列パネルに届くのは全レビューの32.1%だけ**。Outlier 43.9% が最大の要因で、束ねる工程では解けなかった
 - **「その他」が261トピック・104,424件の袋になっている**。時系列には乗せない方針だが、全体の14.5%がここに埋まっている
 - **`configs/topic_categories.txt` の語彙は週10件以上60個を目視して作った**。小さいトピック側は見ていないので、分類漏れが残っている可能性が高い
+- **t2（`fish, sushi`）は実質死んだ系列**。DAVE THE DIVER の発売減衰で、最初の週950件・以降50件以下。土台の定義の穴（→ 次の一手2）
+- **週次の周期性は未測定**。年次季節性は確認できたが、曜日・週単位の周期は見ていない
 - **`configs/` を gitignore するかが未決定**（現在は追跡している）
 - **中身の無いトピックが残る**。上位50のうち8個が賞賛/罵倒語のトピック（`best game` `peak` `alright, guess` 等）。固有名詞の除去では消えず、タグ語彙に寄せるまで残る
 - **細かさとゲーム固有はトレードオフ**でデータ量では解けない（`docs/experiments.md` 7.）。ロスターかタグ語彙の側で扱う
@@ -225,6 +247,8 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 
 すべて `docs/decisions.md` に本文がある。ここは索引。
 
+- 2026-09-07: **年次季節性はあった**（r=+0.88）。2026-08-31 の「検出できず」を撤回。季節性は**絶対数**で見る
+- 2026-09-07: 土台の定義は「ウィンドウ開始より前に発売」だけでは足りない（発売減衰期が入る）。N週の基準は保留
 - 2026-09-07: 密度の判定は平均ではなく**週あたり件数の中央値**で行う（発売スパイク型を弾くため）
 - 2026-09-07: 端の**部分週は落とす**／各系列の初出より前は0ではなく**欠測**にする
 - 2026-09-06: Steamタグ語彙による束ねは効かなかった（3単位・5,311件）。**「その他」は時系列に乗せない**

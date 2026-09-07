@@ -130,6 +130,8 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。�
 |---|---|
 | `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・参加ゲーム数） |
 
+**可視化は `src/visualization/timeseries_plots.py`**（`plot_series_grid` / `plot_positive_rate_grid` / `plot_overview`）。充足度の配色はオレンジ ↔ アクア。
+
 **主要関数（weekly.py）:**
 - `add_week_column(df)` — UNIX秒からその週の月曜を指す列を足す
 - `trim_partial_weeks(df)` — 端の部分週を落とす（7日そろっていない週は件数が落ちて誤読される）

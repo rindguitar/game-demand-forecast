@@ -154,11 +154,16 @@ flowchart LR
 | ファイル | 説明 |
 |---|---|
 | `build_weekly_series.py` | 週次時系列の作成と、系列の健全性の点検 |
+| `plot_weekly_series.py` | 折れ線グラフの作成（`data/timeseries/plots/`） |
 
 **使用方法:**
 ```bash
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
+docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 ```
+
+図は1枚に線を重ねず、系列ごとに小さい図を並べます（`.claude/rules/mermaid.md` の
+「1枚の線を減らす」と同じ理由）。コンテナに日本語フォントが無いのでラベルは英語です。
 
 ---
 
