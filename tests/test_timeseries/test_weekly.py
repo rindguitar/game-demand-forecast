@@ -96,6 +96,41 @@ def test_build_weekly_series_positive_rate_value():
     assert series['positive_rate'].iloc[0] == pytest.approx(0.75)
 
 
+def test_expected_positive_rate_reflects_game_mix():
+    """期待ポジ率は、そのトピック・その週のゲーム構成から決まる
+
+    ゲームAは全レビューがポジ（100%）、ゲームBは全部ネガ（0%）。
+    半々のトピックなら期待は50%になる。
+    """
+    rows = [(1, 0, 'A', True), (1, 0, 'B', False),
+            (2, 0, 'A', True), (2, 0, 'A', True)]
+    series = build_weekly_series(add_week_column(_reviews(rows)), min_reviews_for_rate=1)
+    by_unit = series.set_index('unit')['expected_positive_rate']
+    assert by_unit[1] == pytest.approx(0.5)   # AとBが半々
+    assert by_unit[2] == pytest.approx(1.0)   # Aだけ
+
+
+def test_positive_rate_gap_removes_game_reputation():
+    """評判の悪いゲームに偏ったトピックでも、期待どおりなら差はゼロになる
+
+    実測: cards は実際50%だが、中身の93%を占める MTG Arena 自体が53%で、
+    差はほぼ無かった。これを絶対値のまま読むと「満たされていない需要」と誤読する。
+    """
+    # ゲームBは評判が悪い（4件中1件だけポジ = 25%）。トピック1はBだけで構成される
+    rows = [(1, 0, 'B', True), (1, 0, 'B', False), (1, 0, 'B', False), (1, 0, 'B', False)]
+    series = build_weekly_series(add_week_column(_reviews(rows)), min_reviews_for_rate=1)
+    row = series.iloc[0]
+    assert row['positive_rate'] == pytest.approx(0.25)   # 絶対値は低い
+    assert row['positive_rate_gap'] == pytest.approx(0.0)  # ゲームの評判どおりなので差はゼロ
+
+
+def test_positive_rate_gap_is_missing_when_rate_is():
+    """件数が足りない週は、差も欠測にする"""
+    df = add_week_column(_reviews([(1, 0, 'A', True), (1, 0, 'A', False)]))
+    series = build_weekly_series(df, min_reviews_for_rate=5)
+    assert pd.isna(series['positive_rate_gap'].iloc[0])
+
+
 def test_build_weekly_series_counts_games():
     """参加ゲーム数を数える"""
     df = add_week_column(_reviews([(1, 0, 'A', True), (1, 0, 'B', True), (1, 0, 'A', True)]))

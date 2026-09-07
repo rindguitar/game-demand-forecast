@@ -63,12 +63,19 @@ def build_weekly_series(df: pd.DataFrame,
       3. 各単位の初出より前の週は欠測に戻す（需要ゼロではなく観測対象外のため）
       4. その週の総言及数で割ってシェアを出す
 
+    充足度は「実際のポジ率」だけでなく「期待ポジ率」も出す。トピックは特定のゲームに
+    偏るので、実際の率だけ見るとそのゲームの評判をそのまま読んでしまう
+    （実測: cards は50%だが、中身の93%を占める MTG Arena 自体が53%だった）。
+    期待ポジ率は「そのトピック・その週のゲーム構成なら何%になるはずか」で、
+    差し引いた `positive_rate_gap` が要素そのものの効き方になる。
+
     Args:
         denominator: 週ごとの総言及数。省略すると、渡された df 全体の週次件数を使う
         min_reviews_for_rate: ポジ率を出す最小件数。これ未満の週は欠測にする
 
     Returns:
-        week / unit / count / games / positive_rate / share / total を持つ縦長のDataFrame
+        week / unit / count / games / share / total /
+        positive_rate / expected_positive_rate / positive_rate_gap を持つ縦長のDataFrame
     """
     # 週の軸は、観測された週ではなく最初から最後までの連続した週にする。
     # 1件も無い週を飛ばすと、その週が時間軸から消えて系列がずれる
@@ -78,11 +85,18 @@ def build_weekly_series(df: pd.DataFrame,
         denominator = df.groupby(week_column).size()
     denominator = denominator.reindex(weeks).fillna(0)
 
-    grouped = df.groupby([unit_column, week_column])
+    # ゲームごとの全期間のポジ率を、各レビューに貼る。
+    # それを平均すると「そのトピック・その週のゲーム構成から期待されるポジ率」になる
+    game_rates = df.groupby(game_column)[positive_column].mean()
+    working = df.copy()
+    working['_game_rate'] = working[game_column].map(game_rates)
+
+    grouped = working.groupby([unit_column, week_column])
     table = pd.DataFrame({
         'count': grouped.size(),
         'games': grouped[game_column].nunique(),
         'positives': grouped[positive_column].sum(),
+        'expected_positive_rate': grouped['_game_rate'].mean(),
     })
 
     # 2. 全週 × 全単位の格子に広げる（欠けた週は0件）
@@ -96,7 +110,7 @@ def build_weekly_series(df: pd.DataFrame,
     weeks_level = table.index.get_level_values(week_column)
     units_level = table.index.get_level_values(unit_column)
     before_first = weeks_level < units_level.map(first_seen)
-    table.loc[before_first, ['count', 'games', 'positives']] = pd.NA
+    table.loc[before_first, ['count', 'games', 'positives', 'expected_positive_rate']] = pd.NA
 
     # 4. シェアと充足度
     table = table.reset_index()
@@ -104,4 +118,6 @@ def build_weekly_series(df: pd.DataFrame,
     table['share'] = table['count'] / table['total'].replace(0, pd.NA)
     enough = table['count'] >= min_reviews_for_rate
     table['positive_rate'] = (table['positives'] / table['count']).where(enough)
+    table['expected_positive_rate'] = table['expected_positive_rate'].where(enough)
+    table['positive_rate_gap'] = table['positive_rate'] - table['expected_positive_rate']
     return table.drop(columns=['positives']).rename(columns={unit_column: 'unit'})

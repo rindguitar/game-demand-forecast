@@ -27,8 +27,11 @@ def series():
     rows = []
     for unit, kw in [(1, 'cards, decks'), (2, 'hunting, animals')]:
         for i, w in enumerate(weeks):
+            rate = 0.5 + i * 0.04
             rows.append({'week': w, 'unit': unit, 'keywords': kw,
-                         'count': 10 + i, 'share': 0.1, 'positive_rate': 0.5 + i * 0.04})
+                         'count': 10 + i, 'share': 0.1, 'positive_rate': rate,
+                         'expected_positive_rate': 0.6,
+                         'positive_rate_gap': rate - 0.6})
     return pd.DataFrame(rows)
 
 

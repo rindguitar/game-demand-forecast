@@ -24,7 +24,7 @@ LINE_COLOR = '#3A4A5A'
 ROLLING_COLOR = '#C64B3C'
 
 
-def _grid(n: int, columns: int = 3, height: float = 2.0):
+def _grid(n: int, columns: int = 3, height: float = 2.2):
     """小さい図を並べる格子を作る（1枚に線を詰め込まず、系列ごとに分ける）"""
     rows = math.ceil(n / columns)
     fig, axes = plt.subplots(rows, columns, figsize=(columns * 4.2, rows * (height + 0.5)),
@@ -84,29 +84,38 @@ def plot_series_grid(series: pd.DataFrame, value_column: str, title: str,
 
 
 def plot_positive_rate_grid(series: pd.DataFrame, title: str, save_path: str,
-                            baseline: Optional[float] = None, rolling: int = 4) -> str:
+                            rolling: int = 4) -> str:
     """
-    充足度（ポジ率）を単位ごとに描く
+    充足度を「期待ポジ率との差」で描く
 
-    基準線より上をアクア、下をオレンジで塗る。基準線は既定でパネル全体のポジ率にする
-    （50%を基準にすると、自然比率が8割近いこのデータでは全部が「満たされている」に見える）。
+    実際のポジ率をそのまま描くと、そのトピックがどのゲームの話かを映すだけになる
+    （評判の悪いゲームのトピックは常に低く、良いゲームのトピックは常に高く出る）。
+    ゲーム構成から期待される率を引いた差を描くことで、要素そのものの効き方が残る。
+
+    0より上（アクア）= その要素に触れた人はゲームを高く評価する傾向
+    0より下（オレンジ）= 低く評価する傾向
     """
-    if baseline is None:
-        baseline = series['positive_rate'].mean()
     order = series.groupby('unit')['count'].median().sort_values(ascending=False).index
     fig, axes, slots = _grid(len(order))
+    limit = series['positive_rate_gap'].abs().quantile(0.99)
 
     for ax, unit in zip(axes, order):
         one = series[series['unit'] == unit].sort_values('week')
-        smooth = one['positive_rate'].rolling(rolling, min_periods=1).mean()
-        ax.plot(one['week'], smooth, color=LINE_COLOR, linewidth=1.2)
-        ax.axhline(baseline, color='#999999', linewidth=0.8, linestyle='--')
-        ax.fill_between(one['week'], baseline, smooth, where=smooth >= baseline,
+        gap = one['positive_rate_gap'].rolling(rolling, min_periods=1).mean()
+        ax.plot(one['week'], gap, color=LINE_COLOR, linewidth=1.2)
+        ax.axhline(0, color='#999999', linewidth=0.8, linestyle='--')
+        ax.fill_between(one['week'], 0, gap, where=gap >= 0,
                         color=HIGH_COLOR, alpha=0.45, interpolate=True)
-        ax.fill_between(one['week'], baseline, smooth, where=smooth < baseline,
+        ax.fill_between(one['week'], 0, gap, where=gap < 0,
                         color=LOW_COLOR, alpha=0.45, interpolate=True)
-        ax.set_ylim(0, 1)
-        ax.set_title(f"t{unit}  {_label(one['keywords'].iloc[0])}", fontsize=8, loc='left')
+        ax.set_ylim(-limit, limit)
+
+        # 絶対値も分かるようにタイトルへ入れる（差だけだと水準が見えないため）
+        actual = (one['positive_rate'] * one['count']).sum() / one['count'].sum()
+        expected = (one['expected_positive_rate'] * one['count']).sum() / one['count'].sum()
+        ax.set_title(f"t{unit}  {_label(one['keywords'].iloc[0], 26)}\n"
+                     f"actual {actual:.0%} vs expected {expected:.0%}"
+                     f"  ({actual - expected:+.0%})", fontsize=8, loc='left')
         ax.tick_params(labelsize=7)
         ax.margins(x=0.01)
         _format_date_axis(ax)
@@ -116,7 +125,7 @@ def plot_positive_rate_grid(series: pd.DataFrame, title: str, save_path: str,
     for ax in axes[len(order):slots]:
         ax.set_visible(False)
 
-    fig.suptitle(f"{title}  (dashed line = panel average {baseline:.0%})", fontsize=12, y=0.995)
+    fig.suptitle(f"{title}  (gap vs the rate expected from the game mix)", fontsize=12, y=0.997)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
