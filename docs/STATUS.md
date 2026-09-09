@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-09-09（作業のたびに更新）／ 直近: Issue #37 完了・クローズ。積み残しを #42 に切り出した
+最終更新: 2026-09-09（作業のたびに更新）／ 直近: Issue #37 完了・PR #43 マージ済み。積み残しを #42 に切り出した
 
 実測した数字は `docs/experiments.md` が一次ソース。ここには現在地だけを置く。
 
@@ -274,7 +274,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | #37 の積み残し。再収集・再抽出は不要 |
 
-**`feature/topic-granularity-metrics` が未マージで残っている**（Issue #37 の実装・ドキュメント）。PRを出してマージし、ブランチを削除してから次に進むこと。
+**次の作業は `main` から新しいブランチを切ること**（[PR #43](https://github.com/rindguitar/game-demand-forecast/pull/43) はマージ済み・Issue #37 もクローズ）。
 
 ### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
