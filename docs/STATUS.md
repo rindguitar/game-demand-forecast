@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-09-09（作業のたびに更新）／ 直近: #42 の需要側を実測。24本では組み合わせを語れないことが分かった
+最終更新: 2026-09-09（作業のたびに更新）／ 直近: 供給側354本のタグを検証。組み合わせが観測できるようになった
 
 実測した数字は `docs/experiments.md` が一次ソース。ここには現在地だけを置く。
 
@@ -22,6 +22,47 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 なお Phase 5 の「継続的データ収集（最低1ヶ月分）」は1ヶ月待つ必要はない。Steamレビューは `timestamp_created` を持ち古い方へ遡れるため、過去分をまとめて取得できる。
 
 ## 前回やったこと
+
+### 2026-09-09: 供給側のタグを検証した。ロスター拡大に迫れる（Issue #42）
+
+`src/data/pool_tags.py` と `scripts/nlp/validate_tag_supply.py` を追加（`make validate-tags`）。
+**収集ゼロ**（母集団キャッシュにあるタグを使うだけ）。
+
+**結論: 迫れる。ただし部分的**（→ `docs/decisions.md` 2026-09-09）。
+
+```
+検証1  タグとトピックは同じ構造か   ρ = +0.287 (p<0.0001)  偶然の目安 0.123   ✅
+検証2  本数を増やすと見えるか       2本以上に同居するペア 1組 → 906組         ✅
+```
+
+```
+              ゲーム  語彙  観測ペア  可能ペア  2本以上  5本以上  最大同居
+24本 × トピック    24   136     358    9,180       1       0       3
+24本 × タグ        24    86     333    3,655      18       1       5
+354本 × タグ      354   241   2,329   28,920     906     213      48
+```
+
+**⚠️ 効いているのは語彙ではなく本数**。
+
+```
+語彙の効果（24本で比較）    1組 →  18組
+サンプル数の効果（タグで）  18組 → 906組
+```
+
+**ロスター拡大こそが本筋であることをデータが裏付けた。** タグはその代理として使える。
+
+**⚠️ 判定の落とし穴を1つ踏んだ**。最初はタグ6個とトピック6個で揃えて測り
+ρ = +0.103（偶然の範囲）で「タグは代用にならない」と出たが、**これは誤りだった**。
+トピックのレシピは96%のペアで重なりゼロで、相関を測れる標本が9組しかなかった。
+**重なりが無いことと似ていないことは違う。** レシピを厚くして138組にすると ρ = +0.287。
+スクリプトは標本不足のとき「判定不能」と出すよう直した。
+
+**タグは公式APIから取れないことを実測で確認**。`appdetails` に `tags` キーは無く、
+SteamSpy は Cloudflare で403。スクレイピングしか道がない。
+ただし `categories`（`Single-player` / `Co-op` / `PvP` / `In-App Purchases`）はAPIで安全に取れる。
+また**6タグ上限は Steam の制限ではなくこちらの既定値**（`get_game_tags(app_id, n_tags=6)`）。
+
+テスト8件追加。
 
 ### 2026-09-09: ゲーム単位の共起を出した。24本では組み合わせを語れない（Issue #42）
 
@@ -313,9 +354,9 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#38](https://github.com/rindguitar/game-demand-forecast/issues/38) | 小さいトピックの束ね方を決め直す | タグ語彙が効かなかった（回収3単位・5,311件）。**#37 で物差しが決まったので着手可能** |
 | [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier 43.9% を減らすか許容するか | **`min_topic_size` 50 で 40.5% まで下がることを実測済み**（`models/topic_min50`） |
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
-| [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **需要側（24本）は実測済み・組み合わせは語れなかった。次は供給側497本かロスター拡大** |
+| [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **需要側24本＋供給側354本タグまで実測済み。次は需要と供給の突き合わせ** |
 
-**`feature/topic-cooccurrence` で作業中**（#42 の需要側）。
+**`feature/topic-cooccurrence` で作業中**（#42 の需要側＋供給側の検証）。
 
 ### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
@@ -344,6 +385,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 ```bash
 make compare-granularity     # 粒度レベルの比較（既定は ctfidf・再学習しないので数分）
 make cooccurrence            # ゲームごとのレシピと部品ペアの共起
+make validate-tags           # 供給側タグが代用になるかの検証
 docker compose exec dev python scripts/nlp/compare_topic_granularity.py --distance embedding
 docker compose exec dev python scripts/nlp/categorize_topics.py
 docker compose exec dev python scripts/nlp/categorize_topics.py --show propernoun
@@ -400,6 +442,12 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 - **部品の粒度では単独の時系列が引けない**（→ Issue #42）。粒度を動かしても解けないことは実測済み。埋め込みが `building` と `platforming` を近いと見ている件も、粒度では直せない
 - **24本では部品の組み合わせが観測できない**（→ 2026-09-09 の節）。企画書の粗さ（3〜4部品）まで絞ると2本以上で同居するペアがゼロになる。供給側（`pool_cache.json` の497本のタグ）かロスター拡大が要る
 - **レビュー単位の共起が取れない**。1レビュー1トピックのため。取るなら `approximate_distribution` でトピック分布を出し直す必要がある
+- **タグの6個上限はこちらの既定値**（`get_game_tags(app_id, n_tags=6)`）。
+  タグとトピックの一致が ρ=+0.287 と中程度に留まるのは、この切り詰めが原因の可能性がある。
+  上げれば改善するかは未検証（HTMLスクレイピングなので壊れやすい点は変わらない）
+- **母集団497本のうち143本にタグが無い**。欠損が偏っているかは未調査
+- **需要と供給の突き合わせが未着手**。タグ（供給）で組み合わせは見えるようになったが、
+  未充足 = 需要 − 供給 を言うには需要側と重ねる必要がある
 
 ### データセットの偏り
 
@@ -435,6 +483,7 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 
 すべて `docs/decisions.md` に本文がある。ここは索引。
 
+- 2026-09-09: 供給側のタグは**ロスター拡大に迫れる**（ρ=+0.287・2本以上のペア 1→906組）。効いているのは**語彙ではなく本数**
 - 2026-09-09: 共起は**出現ではなくリフト**で測る。ただし**24本では組み合わせを語れない**
 - 2026-09-09: 目標粒度は**1つの粒度では密度と純度が両立しない**。線は「融合した束が成果物に乗るか」で引く（レベル300前後）
 - 2026-09-09: 粒度は**再学習ではなくマージ木を切って**動かす／束ねる距離は**embedding**／物差しは**有効単位数**

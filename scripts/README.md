@@ -144,6 +144,25 @@ flowchart LR
 ⚠️ **24本では「このペアが無い = 未開拓」は言えません**（ペアは44,850通り）。
 読めるのはレシピと、観測された共起までです。
 
+**供給側のタグが代用になるか検証する**
+
+```mermaid
+flowchart LR
+    PC[("pool_cache.json<br/>354本のタグ")] --> VT["validate_tag_supply.py"]
+    GC[("games.csv<br/>ロスター24本")] --> VT
+    RC[("cooccurrence/<br/>recipes.csv")] --> VT
+    VT --> TV[("tag_supply_validation.csv")]
+    VT --> SA[("similarity_agreement.csv")]
+```
+
+`validate_tag_supply.py` は2つ測ります。**検証1**は同じ24本で「タグで測ったゲームの似方」と
+「トピックで測った似方」を相関させ、タグが同じ構造を捉えているかを見ます。
+**検証2**は `24本×トピック / 24本×タグ / 354本×タグ` を並べ、
+効いているのが語彙なのかサンプル数なのかを分離します。
+
+⚠️ 検証1は標本が要ります。`build_topic_cooccurrence.py --min-lift 1.0` で厚くしたレシピを
+`--recipes` に渡してください。既定のレシピ（リフト2倍以上）だと重なりが足りず判定不能になります。
+
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
@@ -153,6 +172,7 @@ flowchart LR
 | `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
 | `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す（Issue #42） |
+| `validate_tag_supply.py` | 供給側のタグがロスター拡大の代用になるか検証する（Issue #42） |
 
 **使用方法:**
 ```bash

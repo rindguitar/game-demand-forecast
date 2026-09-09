@@ -72,6 +72,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_steam_collector.py` | `src/data/steam_collector.py` | Steam APIレビュー収集の動作確認 |
 | `test_filtering.py` | `src/data/steam_collector.py` | langdetectフィルタリングの段階別検証（フィルタリング前後の比較） |
 | `test_preprocessing.py` | `src/data/preprocessing.py` | テキスト前処理の動作確認 |
+| `test_pool_tags.py` | `src/data/pool_tags.py` | 母集団キャッシュからのタグ読み出し・欠損の扱い |
 
 > **注意**: `test_steam_collector.py` と `test_filtering.py` は実際にSteam APIを呼び出すため、実行には `.env` のAPIキー設定が必要です。
 
@@ -87,7 +88,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定） |
 | `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
 | `test_topic_granularity.py` | `src/nlp/topic_granularity.py` | マージ木の入れ子性・束のキーワード・束内のばらつき |
-| `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | リフトの計算・レシピの閾値・共起をゲーム数で数えること |
+| `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出・パネルの密度と集中度 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
 

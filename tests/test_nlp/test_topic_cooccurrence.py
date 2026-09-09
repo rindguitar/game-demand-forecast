@@ -95,3 +95,32 @@ def test_cooccurrence_empty_when_no_game_has_two_units():
     recipes = pd.DataFrame([{'game_name': 'A', 'unit': 1},
                             {'game_name': 'B', 'unit': 2}])
     assert build_cooccurrence(recipes).empty
+
+
+def test_game_similarity_is_jaccard():
+    """ゲーム同士の似方は、共有している部品の割合（Jaccard）"""
+    from src.nlp.topic_cooccurrence import game_similarity
+    memberships = pd.DataFrame([
+        {'game_name': 'A', 'unit': 1}, {'game_name': 'A', 'unit': 2},
+        {'game_name': 'B', 'unit': 2}, {'game_name': 'B', 'unit': 3},
+    ])
+    sim = game_similarity(memberships).set_index(['game_a', 'game_b'])
+    # 共有1個 / 合計3個
+    assert sim.loc[('A', 'B'), 'jaccard'] == pytest.approx(1 / 3)
+
+
+def test_game_similarity_is_zero_without_overlap():
+    """重なりが無ければ0（『似ていない』ではなく『比べる材料が無い』印にもなる）"""
+    from src.nlp.topic_cooccurrence import game_similarity
+    memberships = pd.DataFrame([{'game_name': 'A', 'unit': 1},
+                                {'game_name': 'B', 'unit': 2}])
+    assert game_similarity(memberships).iloc[0]['jaccard'] == 0.0
+
+
+def test_game_similarity_covers_every_pair_once():
+    """全ペアが1行ずつ出る（順序違いの重複を作らない）"""
+    from src.nlp.topic_cooccurrence import game_similarity
+    memberships = pd.DataFrame([{'game_name': g, 'unit': 1} for g in 'ABCD'])
+    sim = game_similarity(memberships)
+    assert len(sim) == 6
+    assert (sim['game_a'] < sim['game_b']).all()

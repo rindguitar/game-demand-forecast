@@ -1,6 +1,6 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
-        extract-topics compare-granularity cooccurrence test-topic \
+        extract-topics compare-granularity cooccurrence validate-tags test-topic \
         collect-10k collect-20k learning-curve analyze-curve
 
 help:
@@ -37,6 +37,7 @@ help:
 	@echo "  make extract-topics     - トピック抽出（10000件レビュー）"
 	@echo "  make compare-granularity - トピックの粒度レベルを比較（再学習なし）"
 	@echo "  make cooccurrence       - ゲームごとのレシピと部品ペアの共起"
+	@echo "  make validate-tags      - 供給側タグが代用になるかの検証"
 	@echo "  make learning-curve     - Learning Curve実験（10k vs 20k）"
 	@echo "  make analyze-curve      - Learning Curve結果分析・可視化"
 	@echo "  make train-sentiment      - vanillaベースライン学習（⚠️best_model_pre_dapt上書き）"
@@ -157,6 +158,15 @@ compare-granularity:
 # ゲームごとのレシピと部品ペアの共起（Issue #42 の材料・再学習なし）
 cooccurrence:
 	docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py $(COOCCURRENCE_ARGS)
+
+# 供給側タグがロスター拡大の代用になるかの検証（Issue #42）
+# 検証1は標本が要るので、リフト下限を緩めたレシピを渡す
+validate-tags:
+	docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \
+		--min-lift 1.0 --min-count 20 --outdir data/timeseries/cooccurrence_full \
+		--top 1 --top-pairs 1
+	docker compose exec dev python scripts/nlp/validate_tag_supply.py \
+		--recipes data/timeseries/cooccurrence_full/recipes.csv $(VALIDATE_TAGS_ARGS)
 
 # 感情分析モデル学習（vanilla base＝DAPT前のベースライン）
 # ⚠️ 警告: models/best_model_pre_dapt/ を上書きします

@@ -77,3 +77,24 @@ def build_cooccurrence(recipes: pd.DataFrame) -> pd.DataFrame:
     return (pd.DataFrame({'games': grouped.size(),
                           'game_list': grouped.apply(lambda s: ' / '.join(sorted(s)))})
             .reset_index().sort_values('games', ascending=False))
+
+
+def game_similarity(memberships: pd.DataFrame, game_column: str = 'game_name',
+                    item_column: str = 'unit') -> pd.DataFrame:
+    """ゲーム同士の似方を Jaccard で出す（共有している部品の割合）
+
+    タグとトピックは語彙が違うので、ペアを直接は比べられない。
+    「ゲーム同士がどれだけ似ているか」に落とせば、語彙によらず突き合わせられる。
+
+    Returns:
+        game_a / game_b / jaccard を持つDataFrame（同じ組は1行）
+    """
+    sets = memberships.groupby(game_column)[item_column].apply(set)
+    games = sorted(sets.index)
+    rows = []
+    for i, a in enumerate(games):
+        for b in games[i + 1:]:
+            union = sets[a] | sets[b]
+            rows.append({'game_a': a, 'game_b': b,
+                         'jaccard': len(sets[a] & sets[b]) / len(union) if union else 0.0})
+    return pd.DataFrame(rows, columns=['game_a', 'game_b', 'jaccard'])

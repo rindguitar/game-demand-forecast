@@ -84,11 +84,14 @@ flowchart LR
 | `steam_collector.py` | Steam APIからレビューを収集。langdetectによる英語フィルタリング付き |
 | `preprocessing.py` | レビューテキストのクリーニング・前処理 |
 | `dataset_split.py` | Train/Val/Testへの分割ユーティリティ（stratify対応） |
+| `pool_tags.py` | 母集団キャッシュ（`pool_cache.json`）からSteamのユーザータグを読む |
 
 **主要関数:**
 - `get_steam_reviews(app_id, language, review_type, num)` — レビュー収集
 - `collect_balanced_reviews(app_id, n_positive, n_negative)` — balanced収集
 - `is_valid_english_review(text)` — 英語判定（ASCII・langdetect）
+- `load_pool_tags(path, min_tags, only_games)` — ゲーム × タグの縦長を作る。
+  タグは**供給の信号**（市場が何を出荷したか）で、レビューを集めていないゲームについても取れる
 
 ---
 
@@ -147,6 +150,8 @@ flowchart LR
 - `extract_recipes(matrix, lift, min_lift, min_count)` — ゲームごとのレシピ。
   件数の下限も置く（リフトは分母が小さいと跳ねるため）
 - `build_cooccurrence(recipes)` — 同じレシピに入った部品ペアを、ゲーム数で数える
+- `game_similarity(memberships)` — ゲーム同士の似方（Jaccard）。タグとトピックは語彙が違って
+  ペアを直接比べられないので、ゲームの似方に落として突き合わせる
 
 ---
 
