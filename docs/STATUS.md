@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-09-07（作業のたびに更新）／ 直近: PR #36 をマージし Issue #32 をクローズ
+最終更新: 2026-09-09（作業のたびに更新）／ 直近: 残る課題を Issue #37〜#41 に切り出した
 
 実測した数字は `docs/experiments.md` が一次ソース。ここには現在地だけを置く。
 
@@ -156,15 +156,21 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 
 ## 次の一手（優先順）
 
-1. **Phase 7: Prophet を回す** — 材料は揃った。**年次季節性を入れる**こと（2026-09-07 に検出。前回の結論のままだと外していた）。動きのある `hunting` `dlcs` `civs` から始めるのが素直
+**着手するのは [#41](https://github.com/rindguitar/game-demand-forecast/issues/41)（Phase 7）。** 残りは並行して残る課題として Issue 化済み（2026-09-09）。
 
-2. **土台の定義に N 週の基準を入れるか決める**（保留中） — DAVE THE DIVER（10週前）と MTG Arena（15週前）の発売減衰期がパネルに入っている。Prophet を回して、減衰期が予測をどれだけ壊すかを見てから決める
+| Issue | 内容 | 位置づけ |
+|---|---|---|
+| [#41](https://github.com/rindguitar/game-demand-forecast/issues/41) | **Prophet で週次トピック需要を予測する（Phase 7）** | **いま着手する。年次季節性を入れること。**土台の N 週基準もこの中で判断 |
+| [#37](https://github.com/rindguitar/game-demand-forecast/issues/37) | トピックの目標粒度を1回だけ決める | #38 の物差し。先に決める必要がある |
+| [#38](https://github.com/rindguitar/game-demand-forecast/issues/38) | 小さいトピックの束ね方を決め直す | タグ語彙が効かなかった（回収3単位・5,311件）。#37 が前提 |
+| [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier 43.9% を減らすか許容するか | 到達率32%止まりの最大要因 |
+| [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 
-（[PR #36](https://github.com/rindguitar/game-demand-forecast/pull/36) をマージ済み。Issue #32 もクローズ。次の作業は `main` から新しいブランチを切ること）
+**次の作業は `main` から新しいブランチを切ること**（[PR #36](https://github.com/rindguitar/game-demand-forecast/pull/36) はマージ済み・Issue #32 もクローズ）。
 
-### 到達率が32.1%で頭打ちになっている件
+### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
-時系列に乗るのは全レビューの32.1%。残りは Outlier 43.9% と、束ねても週10件に届かない小さいトピック。**束ねる工程では解けなかった**（→ `docs/decisions.md` 2026-09-06）ので、上げるなら Outlier 側に手を入れることになる。ただし Phase 6 を止める理由にはならないので、先に時系列を引いてから必要性を判断する。
+時系列に乗るのは全レビューの32.1%。残りは Outlier 43.9% と、束ねても週10件に届かない小さいトピック。**束ねる工程では解けなかった**（→ `docs/decisions.md` 2026-09-06）ので、上げるなら Outlier 側に手を入れることになる。Phase 7 を止める理由にはならないので、先に予測を回してから必要性を判断する。
 
 ### トピックの仕分け・束ね・時系列のコマンド
 
