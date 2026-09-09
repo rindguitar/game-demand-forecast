@@ -1,6 +1,6 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
-        extract-topics test-topic \
+        extract-topics compare-granularity test-topic \
         collect-10k collect-20k learning-curve analyze-curve
 
 help:
@@ -35,6 +35,7 @@ help:
 	@echo "  make collect-10k        - 10000件レビュー収集"
 	@echo "  make collect-20k        - 20000件レビュー収集"
 	@echo "  make extract-topics     - トピック抽出（10000件レビュー）"
+	@echo "  make compare-granularity - トピックの粒度レベルを比較（再学習なし）"
 	@echo "  make learning-curve     - Learning Curve実験（10k vs 20k）"
 	@echo "  make analyze-curve      - Learning Curve結果分析・可視化"
 	@echo "  make train-sentiment      - vanillaベースライン学習（⚠️best_model_pre_dapt上書き）"
@@ -147,6 +148,10 @@ analyze-curve:
 # トピック抽出（data/train/reviews_10000.csv → reviews_10000_with_topics.csv）
 extract-topics:
 	docker compose exec dev python scripts/nlp/extract_topics.py
+
+# トピックの粒度レベルを比較（Issue #37 の判断材料・再学習しないので数分で終わる）
+compare-granularity:
+	docker compose exec dev python scripts/nlp/compare_topic_granularity.py $(GRANULARITY_ARGS)
 
 # 感情分析モデル学習（vanilla base＝DAPT前のベースライン）
 # ⚠️ 警告: models/best_model_pre_dapt/ を上書きします

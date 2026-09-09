@@ -107,6 +107,24 @@ flowchart LR
 `categorize_topics.py` と `bundle_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます
 （前者は土台パネルの顔ぶれを `tier` 列から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
 
+**粒度を粗くして比べる**（抽出済みのモデルだけで動く・再学習しない）
+
+```mermaid
+flowchart LR
+    M2{{"models/topic_full"}} --> G["compare_topic_granularity.py"]
+    W2[("reviews_timeseries<br/>_with_topics.csv")] --> G
+    V2[("configs/<br/>topic_categories.txt")] --> G
+    G --> CP[("granularity/<br/>comparison_*.csv")]
+    G --> UN[("granularity/<br/>units_*.csv")]
+```
+
+`compare_topic_granularity.py` は455トピックをマージ木にまとめ、200個 / 100個 ... と切りながら
+どのレベルでも同じ物差しで測って並べます。トピックの目標粒度を決めるための材料で
+（Issue #37）、日々のパイプラインには入りません。物差しの中身は `--help` を参照。
+
+細かい側（トピックを増やす方向）はこの方法では作れません。`extract_topics.py` を
+`--min-topic-size` を下げて回し直す必要があります。
+
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
@@ -114,6 +132,7 @@ flowchart LR
 | `extract_topics.py` | BERTopicによるトピック抽出（本番実行） |
 | `categorize_topics.py` | トピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
+| `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
 
 **使用方法:**
 ```bash
@@ -122,6 +141,7 @@ make train-dapt            # DAPT（MLM継続学習・要コーパス）
 make train-sentiment-dapt  # DAPT baseで微調整（best_model上書き・本番）
 make train-test            # パイプライン確認用（短時間）
 make extract-topics        # トピック抽出
+make compare-granularity   # 粒度レベルの比較（再学習しない）
 ```
 
 `train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。

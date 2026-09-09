@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-09-09（作業のたびに更新）／ 直近: 残る課題を Issue #37〜#41 に切り出し、着手順を #37 → #39 に決めた
+最終更新: 2026-09-09（作業のたびに更新）／ 直近: 粒度の物差しを作り、粗い側を実測した（Issue #37）
 
 実測した数字は `docs/experiments.md` が一次ソース。ここには現在地だけを置く。
 
@@ -22,6 +22,69 @@ Phase 3（感情分析）を予定表の想定より深く実装したため、P
 なお Phase 5 の「継続的データ収集（最低1ヶ月分）」は1ヶ月待つ必要はない。Steamレビューは `timestamp_created` を持ち古い方へ遡れるため、過去分をまとめて取得できる。
 
 ## 前回やったこと
+
+### 2026-09-09: トピックの粒度を測る物差しを作り、粗い側を実測した（Issue #37）
+
+`src/nlp/topic_granularity.py` と `scripts/nlp/compare_topic_granularity.py` を追加。
+抽出済みモデルからマージ木を作り、455 → 300 → ... → 15 と切りながら**同じ物差しで測って並べる**。
+**再学習しないので数分で回る**（→ `docs/decisions.md` 2026-09-09）。
+
+**物差し = 有効単位数**。3条件を全部満たすものだけを数える。
+
+```
+週あたり件数の中央値 ≥ 10          時系列に乗る
+× top1_share < 0.5                1本のゲームの話ではない
+× 分類が ①要素 / ②品質 / ③ビジネス  中身なし・固有名詞ではない
+```
+
+到達率だけを見ると粗くするほど単調に上がって山が無い（23.7% → 56.3%）。有効単位数には山がある。
+
+**実測**（距離 = embedding。レベル455は既存の455トピックそのもので、到達35・有効14を再現した）
+
+```
+レベル  単位数  到達  有効  内要素   到達率  有効到達率  混入率  束内距離
+  455    455    35    14     6    23.7%     7.4%    0.0%   0.000
+  300    300    47    21    12    31.6%    11.0%    1.7%   0.220
+  200    200    53    27    19    40.0%    17.5%    2.6%   0.318  ← 有効単位数の山
+  150    150    50    24    17    42.7%    20.5%    2.6%   0.341
+  100    100    46    22    14    46.8%    23.5%    2.6%   0.372
+   50     50    34    17    11    52.9%    25.0%    8.1%   0.443
+   15     15    15     7     4    56.3%    25.8%   10.0%   0.470
+```
+
+**⚠️ 現在の455トピックでは、企画に効く単位が1つも取れていない。**
+横断していて意味のある到達単位は14個あるが、中身は
+「無料か / 値段 / 友達と遊ぶ / 最適化 / クラッシュ / DLC / toxic」など**条件と品質の話だけ**。
+ゲーム要素（宇宙探索・カード・狩り）は全部 top1_share が高く、1本のゲームの話として落ちている。
+
+粗くすると企画の単位が出てくる（embedding レベル200）:
+
+```
+hunting, fish, sushi, animals       生き物を捕る
+skins, cosmetics, gacha, premium    課金モデル
+open world, sandbox                 オープンワールド
+wife, family, couples               家族向け
+childhood, nostalgic, memories      ノスタルジー
+grind, grinding, farming            グラインド
+```
+
+**束ねる距離は embedding の勝ち**（→ `docs/decisions.md` 2026-09-09）。
+c-TF-IDF（語の重なり）だと `hunting, mods, worth, sale, animals, price`（狩り＋価格）のような
+**意味の通らない袋**が有効単位に数えられる。混入率では捕まらなかったので、
+**束内距離**（束に入ったトピック同士の埋め込み空間での距離）を副指標に足して検出した。
+
+```
+              有効単位数  うち要素  束内距離  混入率
+c-TF-IDF 100       21       14     0.396    7.3%
+embedding 200      27       19     0.318    2.6%
+```
+
+**密度の物差しを1本化した**。`weekly_median` と `measure_panels` を `src/timeseries/weekly.py` の
+`measure_topic_panels()` に集約し、`categorize_topics.py` と粒度比較の**両方が同じ関数を呼ぶ**形にした。
+粒度を変えて比べるとき、物差しが2つあると比較が成り立たないため。
+出力が既存CSVと完全一致することを確認済み（456行）。テスト12件追加・全109件 green。
+
+**残っているのは1文だけ**: 目標粒度を決めて `docs/decisions.md` に書く。材料は揃った。
 
 ### 2026-09-07: 折れ線グラフにして、年次季節性を発見した
 
@@ -163,7 +226,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | Issue | 内容 | 位置づけ |
 |---|---|---|
 | [#41](https://github.com/rindguitar/game-demand-forecast/issues/41) | **Prophet で週次トピック需要を予測する（Phase 7）** | **いま着手する。年次季節性を入れること。**土台の N 週基準もこの中で判断 |
-| [#37](https://github.com/rindguitar/game-demand-forecast/issues/37) | トピックの目標粒度を1回だけ決める | #38 の物差し。先に決める必要がある |
+| [#37](https://github.com/rindguitar/game-demand-forecast/issues/37) | トピックの目標粒度を1回だけ決める | **測る仕組みは実装済み・材料も揃った。あとは1文を決めるだけ** |
 | [#38](https://github.com/rindguitar/game-demand-forecast/issues/38) | 小さいトピックの束ね方を決め直す | タグ語彙が効かなかった（回収3単位・5,311件）。#37 が前提 |
 | [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier 43.9% を減らすか許容するか | 到達率32%止まりの最大要因 |
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
@@ -195,6 +258,8 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 ### トピックの仕分け・束ね・時系列のコマンド
 
 ```bash
+make compare-granularity     # 粒度レベルの比較（既定は ctfidf・再学習しないので数分）
+docker compose exec dev python scripts/nlp/compare_topic_granularity.py --distance embedding
 docker compose exec dev python scripts/nlp/categorize_topics.py
 docker compose exec dev python scripts/nlp/categorize_topics.py --show propernoun
 docker compose exec dev python scripts/nlp/bundle_topics.py --show
@@ -247,7 +312,7 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 - **細かさとゲーム固有はトレードオフ**でデータ量では解けない（`docs/experiments.md` 7.）。ロスターかタグ語彙の側で扱う
 - **Outlier率がゲームで2.5倍違う**。Outlierは需要として数えられないので、ゲームによって「声が届く率」が変わる
 - **Outlier は長いレビューほど多い**（100語以上で53.5%）。上の「到達率が頭打ち」の節を参照
-- **トピックの目標粒度（物差し）が未決定**。「次に作るゲームの企画を書くとして、どのくらいの粗さの情報があれば足りるか」を1回だけ決める必要がある
+- **トピックの目標粒度（1文）が未決定**。物差しと実測は揃った（→ 2026-09-09 の節）。残るは「次に作るゲームの企画を書くとして、どのくらいの粗さなら足りるか」を1文で書くこと
 
 ### データセットの偏り
 
@@ -283,6 +348,7 @@ docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
 
 すべて `docs/decisions.md` に本文がある。ここは索引。
 
+- 2026-09-09: 粒度は**再学習ではなくマージ木を切って**動かす／束ねる距離は**embedding**／物差しは**有効単位数**
 - 2026-09-07: 充足度は絶対値ではなく**ゲーム構成から期待される率との差**で見る
 - 2026-09-07: **年次季節性はあった**（r=+0.88）。2026-08-31 の「検出できず」を撤回。季節性は**絶対数**で見る
 - 2026-09-07: 土台の定義は「ウィンドウ開始より前に発売」だけでは足りない（発売減衰期が入る）。N週の基準は保留
