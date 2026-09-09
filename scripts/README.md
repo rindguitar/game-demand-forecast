@@ -125,6 +125,25 @@ flowchart LR
 細かい側（トピックを増やす方向）はこの方法では作れません。`extract_topics.py` を
 `--min-topic-size` を下げて回し直す必要があります。
 
+**ゲーム単位の共起を出す**（どの部品が同じゲームに同居しているか）
+
+```mermaid
+flowchart LR
+    M3{{"models/topic_full"}} --> CO["build_topic_cooccurrence.py"]
+    W3[("reviews_timeseries<br/>_with_topics.csv")] --> CO
+    V3[("configs/<br/>topic_categories.txt")] --> CO
+    CO --> RE[("cooccurrence/<br/>recipes.csv")]
+    CO --> PA[("cooccurrence/<br/>pairs.csv")]
+```
+
+`build_topic_cooccurrence.py` は「そのゲームらしさ（リフト）」でゲームごとのレシピを作り、
+同じレシピに入った部品のペアを数えます（Issue #42）。**出現では測りません** ——
+素朴に「同じゲームに出るか」で数えると、時系列に乗る35単位のうち21個が全24本に出るため
+ほぼ全結合になり情報にならないからです。
+
+⚠️ **24本では「このペアが無い = 未開拓」は言えません**（ペアは44,850通り）。
+読めるのはレシピと、観測された共起までです。
+
 | ファイル | 説明 |
 |---|---|
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
@@ -133,6 +152,7 @@ flowchart LR
 | `categorize_topics.py` | トピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
+| `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す（Issue #42） |
 
 **使用方法:**
 ```bash

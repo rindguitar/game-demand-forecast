@@ -50,10 +50,16 @@ flowchart LR
     AN --> DS2["nlp/dataset.py"]
     ET["scripts/nlp/extract_topics.py"] --> TP["nlp/topic.py"]
     VA2["scripts/evaluation/<br/>validate_sentiment_english.py"] --> SN["nlp/sentiment.py"]
+    CO["scripts/nlp/<br/>build_topic_cooccurrence.py"] --> TQ["nlp/topic_cooccurrence.py<br/>レシピと共起"]
     CG["scripts/nlp/<br/>compare_topic_granularity.py"] --> TG["nlp/topic_granularity.py<br/>粒度を粗くする"]
     CG --> TC2["nlp/topic_category.py<br/>トピックの仕分け"]
     CG --> WK["timeseries/weekly.py<br/>密度の物差し"]
 ```
+
+図に描いていない線が1本あります。`build_topic_cooccurrence.py` は
+`nlp/topic_cooccurrence.py` のほかに、**`nlp/topic_granularity.py`**（レベル300で単位を作る）と
+**`nlp/topic_category.py`**（中身なし・固有名詞をレシピから外す）も使います。
+線を描くと交差するので本文に出しました。
 
 この構造の意味は次の通りです。
 
@@ -106,6 +112,7 @@ flowchart LR
 | `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `topic_granularity.py` | 抽出済みのトピックをマージ木にまとめ、任意の個数で切って粗い版を作る |
+| `topic_cooccurrence.py` | ゲームごとのレシピ（そのゲームらしい部品）と、部品ペアの共起を出す |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
@@ -133,6 +140,13 @@ flowchart LR
   細かいレベルの入れ子になり、「粒度だけを動かした」比較が成立する
 - `group_dispersion(model, mapping)` — 束の中のトピック同士がどれだけ離れているか。
   束ね方によらず埋め込み空間で測るので、語の重なりで束ねた結果の審判にも使える
+
+**主要関数（topic_cooccurrence.py）:**
+- `compute_lift(matrix)` — そのゲームらしさ = そのゲームでの出現率 ÷ 全体での出現率。
+  **出現では測らない**（時系列に乗る35単位のうち21個が全24本に出るのでほぼ全結合になる）
+- `extract_recipes(matrix, lift, min_lift, min_count)` — ゲームごとのレシピ。
+  件数の下限も置く（リフトは分母が小さいと跳ねるため）
+- `build_cooccurrence(recipes)` — 同じレシピに入った部品ペアを、ゲーム数で数える
 
 ---
 
