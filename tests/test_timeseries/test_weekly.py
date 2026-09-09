@@ -135,3 +135,48 @@ def test_build_weekly_series_counts_games():
     """参加ゲーム数を数える"""
     df = add_week_column(_reviews([(1, 0, 'A', True), (1, 0, 'B', True), (1, 0, 'A', True)]))
     assert build_weekly_series(df)['games'].iloc[0] == 2
+
+
+def test_measure_topic_panels_uses_median_density():
+    """週あたり件数は中央値で測る（発売スパイク型を密度十分にしないため）"""
+    from src.timeseries.weekly import measure_topic_panels
+    # トピック1は最初の週だけ100件、以降は毎週1件（平均は高いが中央値は1）
+    rows = [(1, 0, 'A', True)] * 100 + [(1, w, 'A', True) for w in range(1, 10)]
+    rows += [(2, w, 'A', True) for w in range(10) for _ in range(5)]
+    df = _reviews(rows)
+    # 端の週を完全にして落とされないようにする
+    df.loc[len(df)] = {'topic_id': 1, 'timestamp_created': MONDAY,
+                       'game_name': 'A', 'voted_up': True}
+    df.loc[len(df)] = {'topic_id': 1, 'timestamp_created': MONDAY + 10 * WEEK - 60,
+                       'game_name': 'A', 'voted_up': True}
+    panels, _ = measure_topic_panels(df, backbone_games=['A'])
+    assert panels.loc[1, 'per_week_all'] < panels.loc[2, 'per_week_all']
+
+
+def test_measure_topic_panels_excludes_outlier():
+    """Outlier（-1）は単位として数えない"""
+    from src.timeseries.weekly import measure_topic_panels
+    rows = [(-1, w, 'A', True) for w in range(5)] + [(1, w, 'A', True) for w in range(5)]
+    panels, totals = measure_topic_panels(_reviews(rows), backbone_games=['A'])
+    assert -1 not in panels.index
+    assert totals['assigned'] < totals['all_reviews']
+
+
+def test_measure_topic_panels_top1_share_and_backbone():
+    """集中度は最も多いゲームの割合。土台パネルは指定したゲームだけで測る"""
+    from src.timeseries.weekly import measure_topic_panels
+    rows = [(1, w, 'A', True) for w in range(6) for _ in range(3)]
+    rows += [(1, w, 'B', True) for w in range(6)]
+    panels, _ = measure_topic_panels(_reviews(rows), backbone_games=['B'])
+    assert panels.loc[1, 'top1_game'] == 'A'
+    assert panels.loc[1, 'top1_share'] == pytest.approx(0.75)
+    assert panels.loc[1, 'count_backbone'] < panels.loc[1, 'count_all']
+
+
+def test_measure_topic_panels_respects_unit_column():
+    """束ねた単位（unit 列）でも同じ物差しで測れる"""
+    from src.timeseries.weekly import measure_topic_panels
+    df = _reviews([(1, w, 'A', True) for w in range(6)])
+    df['unit'] = 7
+    panels, _ = measure_topic_panels(df, backbone_games=['A'], unit_column='unit')
+    assert panels.index.tolist() == [7]

@@ -50,6 +50,9 @@ flowchart LR
     AN --> DS2["nlp/dataset.py"]
     ET["scripts/nlp/extract_topics.py"] --> TP["nlp/topic.py"]
     VA2["scripts/evaluation/<br/>validate_sentiment_english.py"] --> SN["nlp/sentiment.py"]
+    CG["scripts/nlp/<br/>compare_topic_granularity.py"] --> TG["nlp/topic_granularity.py<br/>粒度を粗くする"]
+    CG --> TC2["nlp/topic_category.py<br/>トピックの仕分け"]
+    CG --> WK["timeseries/weekly.py<br/>密度の物差し"]
 ```
 
 この構造の意味は次の通りです。
@@ -102,6 +105,7 @@ flowchart LR
 | `topic.py` | BERTopicによるトピック抽出。ゲーム名除去・英語フィルタリング付き |
 | `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
+| `topic_granularity.py` | 抽出済みのトピックをマージ木にまとめ、任意の個数で切って粗い版を作る |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
@@ -119,6 +123,16 @@ flowchart LR
 **主要関数（topic_bundle.py）:**
 - `load_tag_vocabulary(genres, tags)` — 台帳のジャンル列・タグ列から束ね先を作る（長い順）
 - `assign_bundle(keywords, vocabulary)` — 束ね先タグを1つ決める。当たらなければ `None`
+
+**主要関数（topic_granularity.py）:**
+- `topic_matrix(model, source)` — モデルからトピックの行列を取る。`ctfidf` は語の重なり、
+  `embedding` は意味の近さ。Outlier（-1）は束ねる対象ではないので外す
+- `build_linkage(matrix)` — コサイン距離でマージ木を作る（BERTopic の `hierarchical_topics`
+  と同じ ward 法。本家と違い fit 時の文書が要らないので保存済みモデルだけで動く）
+- `cut_levels(tree, topic_ids, levels)` — 木を指定の個数で切る。同じ木を切るので粗いレベルは
+  細かいレベルの入れ子になり、「粒度だけを動かした」比較が成立する
+- `group_dispersion(model, mapping)` — 束の中のトピック同士がどれだけ離れているか。
+  束ね方によらず埋め込み空間で測るので、語の重なりで束ねた結果の審判にも使える
 
 ---
 
@@ -141,6 +155,11 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。�
 - `trim_partial_weeks(df)` — 端の部分週を落とす（7日そろっていない週は件数が落ちて誤読される）
 - `build_weekly_series(df, ...)` — 単位 × 週の表を作る。週の軸は連続した週で埋め、
   各単位の初出より前は欠測にする（需要ゼロではなく観測対象外のため）
+- `weekly_median(df, week_axis, unit_column)` — 単位ごとの週あたり件数の中央値。
+  平均だと発売スパイク型が密度十分に見える（→ `docs/decisions.md` 2026-09-07）
+- `measure_topic_panels(df, backbone_games, unit_column)` — パネルごとの密度とゲーム集中度。
+  `scripts/nlp/categorize_topics.py` と `scripts/nlp/compare_topic_granularity.py` の
+  **両方がこれを呼ぶ**。粒度を変えて比べるとき、物差しが1つでないと比較が成り立たないため
 
 ---
 

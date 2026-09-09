@@ -121,3 +121,60 @@ def build_weekly_series(df: pd.DataFrame,
     table['expected_positive_rate'] = table['expected_positive_rate'].where(enough)
     table['positive_rate_gap'] = table['positive_rate'] - table['expected_positive_rate']
     return table.drop(columns=['positives']).rename(columns={unit_column: 'unit'})
+
+
+def weekly_median(df: pd.DataFrame, week_axis: pd.Index,
+                  unit_column: str = 'topic_id') -> pd.Series:
+    """単位ごとに「週あたり件数の中央値」を出す
+
+    平均だと発売スパイク型が密度十分に見えてしまう
+    （実測: metroidvania は平均16.7件/週だが中央値は1.0件）。
+    """
+    table = df.groupby([unit_column, 'week']).size().unstack(fill_value=0)
+    return table.reindex(columns=week_axis, fill_value=0).median(axis=1)
+
+
+def measure_topic_panels(df: pd.DataFrame, backbone_games,
+                         unit_column: str = 'topic_id',
+                         game_column: str = 'game_name',
+                         outlier_id: int = -1):
+    """レビュー本体から、パネルごとの週あたり件数とゲーム集中度を測る
+
+    処理の流れ:
+      1. 週の列を足し、端の部分週を落とす
+      2. Outlier を除いた分について、単位ごとの件数・参加ゲーム数・集中度を出す
+      3. 全24本パネルと土台パネルのそれぞれで週あたり件数の中央値を出す
+
+    粒度を変えて比べるとき、物差しが1つでないと比較が成り立たないため、
+    分類スクリプトと粒度比較スクリプトの双方がこの関数を使う。
+
+    Args:
+        df: game_column / timestamp_created / unit_column を持つ生のDataFrame
+        backbone_games: 土台パネルとして数えるゲーム名の並び
+
+    Returns:
+        (単位ごとの指標のDataFrame, 全体の件数などの dict)
+    """
+    df = trim_partial_weeks(add_week_column(df))
+    week_axis = pd.date_range(df['week'].min(), df['week'].max(), freq='W-MON')
+    assigned = df[df[unit_column] != outlier_id]
+
+    grouped = assigned.groupby(unit_column)[game_column]
+    panels = pd.DataFrame({
+        'count_all': assigned[unit_column].value_counts(),
+        'games': grouped.nunique(),
+        'top1_share': grouped.apply(lambda s: s.value_counts(normalize=True).iloc[0]),
+        'top1_game': grouped.apply(lambda s: s.value_counts().index[0]),
+    })
+    panels['mean_per_week_all'] = panels['count_all'] / len(week_axis)
+    panels['per_week_all'] = weekly_median(assigned, week_axis, unit_column)
+
+    bb = assigned[assigned[game_column].isin(backbone_games)]
+    panels['count_backbone'] = bb[unit_column].value_counts()
+    panels['count_backbone'] = panels['count_backbone'].fillna(0).astype(int)
+    panels['per_week_backbone'] = (weekly_median(bb, week_axis, unit_column)
+                                   .reindex(panels.index).fillna(0))
+
+    totals = {'all_reviews': len(df), 'assigned': len(assigned),
+              'backbone_assigned': len(bb), 'weeks': len(week_axis)}
+    return panels, totals

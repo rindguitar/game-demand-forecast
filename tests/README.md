@@ -37,6 +37,7 @@ flowchart LR
     T6["test_topic.py"] --> M5["src/nlp/topic.py"]
     T7["test_topic_category.py"] --> M6["src/nlp/topic_category.py"]
     T8["test_topic_bundle.py"] --> M7["src/nlp/topic_bundle.py"]
+    T9["test_topic_granularity.py"] --> M8["src/nlp/topic_granularity.py"]
 ```
 
 ### テストが無いモジュール
@@ -84,7 +85,8 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリング・ゲーム名除去の動作確認 |
 | `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定） |
 | `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
-| `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出 |
+| `test_topic_granularity.py` | `src/nlp/topic_granularity.py` | マージ木の入れ子性・束のキーワード・束内のばらつき |
+| `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出・パネルの密度と集中度 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
 
 ---
