@@ -84,6 +84,24 @@ embedding 200      27       19     0.318    2.6%
 粒度を変えて比べるとき、物差しが2つあると比較が成り立たないため。
 出力が既存CSVと完全一致することを確認済み（456行）。テスト12件追加・全109件 green。
 
+**マージと再学習を突き合わせた**（`min_topic_size` を 20 → 50 にして再学習・218トピック・25分）。
+同じ218単位で並べると**マージのほうが有効単位が多い**ので、
+粒度を探すために再学習を繰り返す必要はない（→ `docs/decisions.md` 2026-09-09）。
+
+```
+                    到達  有効  内要素  到達率  有効到達率  混入率
+マージ218（455を束ねた）  52    26     18   38.7%    16.9%    1.4%
+学習218（min_size=50）   56    23     14   38.3%    11.0%    0.0%
+```
+
+学習側は到達単位こそ多いが、`friends` が2単位に割れる重複や
+`naked, chased, bricks, molested` のような塊が残る。マージ側は
+`hunting, fish, sushi, animals`（18,233件）のように言及がまとまる。
+※束内距離は束ねていないレベルでは構造的に0になるので、そのレベル同士の比較には使えない。
+
+**⚠️ 副産物: `min_topic_size` を上げると Outlier が減った**（43.9% → 40.5%・**24,509件を回収**）。
+粒度の目標とは別の軸なので Issue #39 で扱う。モデルは `models/topic_min50` に残してある。
+
 **残っているのは1文だけ**: 目標粒度を決めて `docs/decisions.md` に書く。材料は揃った。
 
 ### 2026-09-07: 折れ線グラフにして、年次季節性を発見した
@@ -228,7 +246,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#41](https://github.com/rindguitar/game-demand-forecast/issues/41) | **Prophet で週次トピック需要を予測する（Phase 7）** | **いま着手する。年次季節性を入れること。**土台の N 週基準もこの中で判断 |
 | [#37](https://github.com/rindguitar/game-demand-forecast/issues/37) | トピックの目標粒度を1回だけ決める | **測る仕組みは実装済み・材料も揃った。あとは1文を決めるだけ** |
 | [#38](https://github.com/rindguitar/game-demand-forecast/issues/38) | 小さいトピックの束ね方を決め直す | タグ語彙が効かなかった（回収3単位・5,311件）。#37 が前提 |
-| [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier 43.9% を減らすか許容するか | 到達率32%止まりの最大要因 |
+| [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier 43.9% を減らすか許容するか | **`min_topic_size` 50 で 40.5% まで下がることを実測済み**（`models/topic_min50`） |
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 
 **次の作業は `main` から新しいブランチを切ること**（[PR #36](https://github.com/rindguitar/game-demand-forecast/pull/36) はマージ済み・Issue #32 もクローズ）。
