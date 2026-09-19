@@ -512,12 +512,15 @@ def main():
                 g['tier'] = ('土台' if g['release_date'] <= window_start
                              else '直近' if g['release_date'] > recent_from else '中間')
         report_selection(games, genre_counts, pool, args)
-        save_game_master(args.games_output, games)
-        note = f'（既存{len(existing)}本 + 追加{added}本）' if existing else ''
-        print(f'  台帳を保存: {args.games_output}{note}')
+        # --dry-run は「顔ぶれだけ見る」ためのものなので台帳を書き換えない。
+        # 書き換えると、条件を試すだけのつもりが収集対象を変えてしまう
+        if not args.dry_run:
+            save_game_master(args.games_output, games)
+            note = f'（既存{len(existing)}本 + 追加{added}本）' if existing else ''
+            print(f'  台帳を保存: {args.games_output}{note}')
 
     if args.dry_run:
-        print('\n--dry-run のため収集は行わない')
+        print('\n--dry-run のため、台帳の保存も収集も行わない')
         return
 
     # 3. まだ期間を全部カバーできていないゲームだけを収集する
