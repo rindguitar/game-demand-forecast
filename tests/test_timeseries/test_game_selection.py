@@ -113,3 +113,110 @@ def test_genre_cap_prevents_one_genre_from_taking_everything():
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def existing_entry(g, tier='土台'):
+    """台帳から読んだ形（tier を持ち、genres は set）にする"""
+    return dict(g, genres=set(g['genres']), tier=tier)
+
+
+def test_extend_keeps_every_existing_game():
+    """既存の台帳は1本も落とさない（収集済みを無駄にしないため）"""
+    pool = make_pool()
+    keep = [existing_entry(pool[0]), existing_entry(pool[1])]
+    chosen, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                 args(n_games=6), existing=keep)
+    names = [g['name'] for g in chosen]
+    assert names[:2] == ['old0', 'old1']
+    assert len(chosen) == 6
+
+
+def test_extend_does_not_pick_existing_games_twice():
+    """既存は候補から外す（同じゲームが二重に入らない）"""
+    pool = make_pool()
+    keep = [existing_entry(g) for g in pool[:3]]
+    chosen, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                 args(n_games=6), existing=keep)
+    names = [g['name'] for g in chosen]
+    assert len(names) == len(set(names))
+
+
+def test_extend_counts_existing_in_genre_cap():
+    """ジャンル上限は既存分も数える"""
+    pool = make_pool()
+    keep = [existing_entry(g) for g in pool[:4]]   # 全部 Action
+    chosen, counts = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                      args(n_games=10, max_per_genre=5, genre_floor=0),
+                                      existing=keep)
+    assert counts['Action'] <= 5
+    assert len(chosen) == 5
+
+
+def test_extend_counts_existing_in_backbone_cap():
+    """土台の上限も既存分から数える"""
+    pool = make_pool()
+    keep = [existing_entry(g) for g in pool[:3]]   # 3本とも土台
+    chosen, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                 args(n_games=10, max_backbone=3, genre_floor=0),
+                                 existing=keep)
+    backbone = [g for g in chosen if g['release_date'] <= WINDOW_START]
+    assert len(backbone) == 3
+
+
+def test_extend_excludes_games_overlapping_with_existing():
+    """既存と似たゲームは入らない（重なり判定に既存が効いている）"""
+    pool = [game('keepme', ['Action'], ['a', 'b'], '2020-01-01'),
+            game('twin', ['Action'], ['a', 'b'], '2020-02-01'),
+            game('other', ['Action'], ['x', 'y'], '2020-03-01')]
+    chosen, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                 args(n_games=3, genre_floor=0),
+                                 existing=[existing_entry(pool[0])])
+    names = {g['name'] for g in chosen}
+    assert 'twin' not in names
+    assert names == {'keepme', 'other'}
+
+
+def test_relaxing_the_threshold_only_adds():
+    """条件を緩めて足し直すと、前に選んだものはそのまま残って追加だけ起きる
+
+    段階的に広げても収集をやり直さずに済むための性質。
+    """
+    # どの2本も 'a' と 'b' の2個で重なる。閾値2なら1本しか入らず、3なら全部入る
+    pool = [game(f'g{i}', ['Action'], ['a', 'b', f't{i}'], f'2020-0{i + 1}-01')
+            for i in range(5)]
+    strict, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                 args(n_games=5, genre_floor=0, tag_overlap_threshold=2),
+                                 existing=[])
+    loose, _ = select_from_pool(pool, WINDOW_START, MIN_HISTORY,
+                                args(n_games=5, genre_floor=0, tag_overlap_threshold=3),
+                                existing=[existing_entry(g) for g in strict])
+    assert {g['name'] for g in strict} <= {g['name'] for g in loose}
+    assert len(loose) > len(strict)
+
+
+def test_game_master_roundtrip_keeps_numbers_numeric(tmp_path):
+    """台帳を保存して読み戻すと件数は数値のまま
+
+    文字列のままだと母集団から選んだゲームと型が食い違い、
+    既存を固定して追加するとき（--extend）に表示や集計で落ちる。
+    """
+    from collect_timeseries_dataset import load_game_master, save_game_master
+    path = str(tmp_path / 'games.csv')
+    original = dict(game('A', ['Action'], ['x'], '2020-01-01', total=12345), tier='土台')
+    save_game_master(path, [original])
+    loaded = load_game_master(path)[0]
+    assert loaded['total_reviews'] == 12345
+    assert isinstance(loaded['app_id'], int)
+    assert loaded['genres'] == {'Action'}
+    assert loaded['tags'] == {'x'}
+    assert loaded['tier'] == '土台'
+
+
+def test_game_master_roundtrip_tolerates_blank_counts(tmp_path):
+    """件数が空でも読める（古い台帳や取得失敗の行で落ちない）"""
+    from collect_timeseries_dataset import load_game_master
+    path = str(tmp_path / 'games.csv')
+    open(path, 'w', encoding='utf-8').write(
+        'app_id,name,genres,tags,total_reviews,total_positive,total_negative,'
+        'release_date,tier\n1,A,Action,x,,,,2020-01-01,土台\n')
+    assert load_game_master(path)[0]['total_reviews'] == 0

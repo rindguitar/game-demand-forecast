@@ -212,12 +212,21 @@ def save_game_master(path: str, games: list) -> None:
                                  tags='|'.join(sorted(g['tags']))))
 
 
+# 台帳のうち数値として読み戻す列（CSVは全部文字列で返るため）
+GAME_INT_FIELDS = ('app_id', 'total_reviews', 'total_positive', 'total_negative')
+
+
 def load_game_master(path: str) -> list:
-    """保存済みの台帳を読む（選定をやり直さず、同じ24本を収集し直すため）"""
+    """保存済みの台帳を読む（選定をやり直さず、同じ顔ぶれを収集し直すため）
+
+    件数は数値に戻す。文字列のままだと母集団から選んだゲームと型が食い違い、
+    既存を固定して追加するとき（--extend）に表示や集計で落ちる。
+    """
     with open(path, encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
     for r in rows:
-        r['app_id'] = int(r['app_id'])
+        for field in GAME_INT_FIELDS:
+            r[field] = int(r[field]) if str(r.get(field, '')).strip() else 0
         r['genres'] = set(filter(None, r.get('genres', '').split('|')))
         r['tags'] = set(filter(None, r.get('tags', '').split('|')))
     return rows
@@ -308,7 +317,8 @@ def build_pool(args) -> list:
     return pool
 
 
-def select_from_pool(pool: list, window_start: str, min_history: str, args) -> tuple:
+def select_from_pool(pool: list, window_start: str, min_history: str, args,
+                     existing: list = None) -> tuple:
     """
     収集する対象を選ぶ。3つの条件を同時に満たす組を作る
 
@@ -323,14 +333,26 @@ def select_from_pool(pool: list, window_start: str, min_history: str, args) -> t
     希少なジャンルから先に埋める。頻出ジャンルから埋めると枠を使い切ってしまい、
     Racing や Sports の番が来たときに残りが無くなる。
 
+    Args:
+        existing: 既に選んである台帳。渡すと**そのまま固定**して残りだけを足す。
+            3つの条件は既存分も数えたうえで判定するので、既存と似たゲームは入らない。
+            条件は緩める方向にしか動かさない限り、既存の選定はいつでも有効なまま
+            （厳しい条件を満たす集合は、緩い条件も満たす）。足すのは常に追加になる
+
     Returns:
-        (選んだゲームのリスト, ジャンル別の本数)
+        (選んだゲームのリスト, ジャンル別の本数)。existing を渡した場合は既存を含む全体
     """
+    fixed = [dict(g, backbone=g['release_date'] <= window_start) for g in (existing or [])]
+    taken = {g['app_id'] for g in fixed}
     candidates = [dict(g, backbone=g['release_date'] <= window_start)
-                  for g in pool if g['release_date'] <= min_history]
+                  for g in pool
+                  if g['release_date'] <= min_history and g['app_id'] not in taken]
     random.Random(args.seed).shuffle(candidates)
 
-    selected, genre_counts = [], {}
+    selected, genre_counts = list(fixed), {}
+    for g in fixed:
+        for x in g['genres']:
+            genre_counts[x] = genre_counts.get(x, 0) + 1
 
     def acceptable(game):
         if game['backbone'] and sum(1 for g in selected if g['backbone']) >= args.max_backbone:
@@ -406,6 +428,8 @@ def main():
                         help='母集団のメタ情報のキャッシュ。2回目以降はAPIを叩かない')
     parser.add_argument('--refresh-pool', action='store_true',
                         help='母集団の一覧を取り直す（売上上位は日々入れ替わる）')
+    parser.add_argument('--extend', action='store_true',
+                        help='既存の台帳を固定したまま --n-games 本まで追加する')
     parser.add_argument('--reselect', action='store_true',
                         help='既存の台帳を捨ててゲームを選び直す')
     parser.add_argument('--dry-run', action='store_true',
@@ -452,27 +476,45 @@ def main():
         print(f'\n期間を全部カバーできた {len(already)}ゲームをスキップします')
 
     # 2. 収集対象を決める。台帳があればそれを使う（実行のたびに顔ぶれが変わらないように）
-    if os.path.exists(args.games_output) and not args.reselect:
-        games = load_game_master(args.games_output)
-        print(f'\n[1/2] 既存の台帳を使用: {len(games)}本（選び直すなら --reselect）')
+    today = dt.datetime.now(dt.timezone.utc).date()
+    window_start = since_date.isoformat()
+    min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
+    recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+
+    existing = (load_game_master(args.games_output)
+                if os.path.exists(args.games_output) and not args.reselect else [])
+    if existing and not (args.extend and len(existing) < args.n_games):
+        games = existing
+        print(f'\n[1/2] 既存の台帳を使用: {len(games)}本'
+              f'（選び直すなら --reselect / 足すなら --extend）')
     else:
-        print('\n[1/2] ゲーム選定')
-        today = dt.datetime.now(dt.timezone.utc).date()
-        window_start = since_date.isoformat()
-        min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
-        recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+        if existing:
+            print(f'\n[1/2] ゲーム選定（既存{len(existing)}本を固定して'
+                  f'{args.n_games}本まで追加）')
+        else:
+            print('\n[1/2] ゲーム選定')
 
         pool = build_pool(args)
-        games, genre_counts = select_from_pool(pool, window_start, min_history, args)
+        games, genre_counts = select_from_pool(pool, window_start, min_history, args,
+                                               existing=existing)
         if not games:
             print('  条件を満たすゲームが見つかりませんでした')
             return
+        added = len(games) - len(existing)
+        if existing and not added:
+            print('  ⚠️ 条件を満たす追加ゲームがありませんでした。'
+                  '--max-per-genre / --tag-overlap-threshold を緩めてください')
+
+        # 既存の tier は作り直さない。ウィンドウは実行日で動くので、
+        # 再計算すると既に引いた時系列パネルの顔ぶれが変わってしまう
         for g in games:
-            g['tier'] = ('土台' if g['release_date'] <= window_start
-                         else '直近' if g['release_date'] > recent_from else '中間')
+            if not g.get('tier'):
+                g['tier'] = ('土台' if g['release_date'] <= window_start
+                             else '直近' if g['release_date'] > recent_from else '中間')
         report_selection(games, genre_counts, pool, args)
         save_game_master(args.games_output, games)
-        print(f'  台帳を保存: {args.games_output}')
+        note = f'（既存{len(existing)}本 + 追加{added}本）' if existing else ''
+        print(f'  台帳を保存: {args.games_output}{note}')
 
     if args.dry_run:
         print('\n--dry-run のため収集は行わない')

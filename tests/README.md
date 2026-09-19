@@ -93,6 +93,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出・パネルの密度と集中度 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
+| `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
 | `test_collection_coverage.py` | `scripts/collect/collect_timeseries_dataset.py` | 収集の網羅性判定（直近しか無いゲームと、直近しか取れなかったゲームの区別） |
 | `test_row_trimming.py` | `scripts/collect/collect_timeseries_dataset.py` | 再収集・再開時のCSV切り詰め（重複を残さず、記録済みの行は消さないこと） |
 
