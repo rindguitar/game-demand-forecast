@@ -43,10 +43,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 from src.data.steam_collector import (  # noqa: E402
     STOP_EXHAUSTED,
     STOP_REACHED_SINCE,
-    collect_natural_reviews,
     get_popular_games,
     get_release_date,
     get_review_summary,
+    iter_natural_reviews,
+)
+from src.data.collection_progress import (  # noqa: E402
+    NEW_ENTRY,
+    advance,
+    load_progress,
+    save_progress,
 )
 from collect_ood_testset import (  # noqa: E402
     TAG_NOISE,
@@ -122,11 +128,18 @@ def load_collected_ids(path: str, log_path: str) -> set:
     return in_csv
 
 
-def drop_game_rows(path: str, app_ids: set) -> int:
-    """再収集するゲームの行を出力CSVから取り除く（重複追記を防ぐ）"""
-    if not app_ids or not os.path.exists(path):
+def trim_game_rows(path: str, keep: dict) -> int:
+    """指定したゲームの行を、先頭 keep 件だけ残して切り詰める
+
+    追記方式なので、取り直すゲームの古い行は消す必要がある（keep が0）。
+    途中から再開するゲームは、進捗に記録された行数までは正しいので残す。
+    記録より先の行は「追記はしたが進捗を保存する前に落ちた」分で、
+    そのまま再開すると二重になる。切り詰めれば正確に直る。
+    """
+    if not keep or not os.path.exists(path):
         return 0
     tmp = path + '.tmp'
+    seen = {app_id: 0 for app_id in keep}
     removed = 0
     with open(path, encoding='utf-8') as src, \
             open(tmp, 'w', newline='', encoding='utf-8') as dst:
@@ -134,9 +147,12 @@ def drop_game_rows(path: str, app_ids: set) -> int:
         writer = csv.DictWriter(dst, fieldnames=FIELDS, extrasaction='ignore')
         writer.writeheader()
         for row in reader:
-            if row.get('game_id') and int(row['game_id']) in app_ids:
-                removed += 1
-                continue
+            app_id = int(row['game_id']) if row.get('game_id') else None
+            if app_id in seen:
+                if seen[app_id] >= keep[app_id]:
+                    removed += 1
+                    continue
+                seen[app_id] += 1
             writer.writerow(row)
     os.replace(tmp, path)
     return removed
@@ -405,6 +421,9 @@ def main():
     parser.add_argument('--output', default='data/timeseries/reviews_timeseries.csv')
     parser.add_argument('--games-output', default='data/timeseries/games.csv',
                         help='選んだゲームの台帳（ジャンル・タグ・累計レビュー数）')
+    parser.add_argument('--progress-output',
+                        default='data/timeseries/collection_progress.json',
+                        help='収集の途中経過（どのcursorまで取ったか）の保存先')
     parser.add_argument('--log-output', default='data/timeseries/collection_log.csv',
                         help='ゲーム別の収集結果（期間を全部カバーできたかの記録）')
     args = parser.parse_args()
@@ -422,6 +441,13 @@ def main():
 
     # 1. 収集済みを確認（中断からの再開）
     already = load_collected_ids(args.output, args.log_output)
+    # 進捗が残っているゲームは定義上「未完了」。収集ログがまだ無い場合の
+    # フォールバック（CSVに行があれば収集済みとみなす）に飲み込まれないよう、先に外す
+    progress = load_progress(args.progress_output)
+    resumable = already & set(progress)
+    if resumable:
+        already -= resumable
+        print(f'  {len(resumable)}ゲームは収集の途中なので、収集済みから外します')
     if already:
         print(f'\n期間を全部カバーできた {len(already)}ゲームをスキップします')
 
@@ -458,12 +484,18 @@ def main():
         print('\n全ゲームが期間を全部カバー済み。収集するものはありません')
         return
 
-    # 4. 再収集するゲームの古い行を消す（追記方式なので放置すると二重になる）
-    removed = drop_game_rows(args.output, {g['app_id'] for g in targets})
+    # 4. 再開の準備。進捗があるゲームはそこから続け、無いゲームは古い行を消して取り直す
+    keep = {g['app_id']: progress.get(g['app_id'], NEW_ENTRY)['rows'] for g in targets}
+    removed = trim_game_rows(args.output, keep)
+    resuming = [g for g in targets if keep.get(g['app_id'])]
     if removed:
-        print(f'  再収集のため既存 {removed:,}行を削除')
+        print(f'  既存 {removed:,}行を整理しました')
+    if resuming:
+        shown = ', '.join(g['name'][:20] for g in resuming[:3])
+        more = f' ほか{len(resuming) - 3}本' if len(resuming) > 3 else ''
+        print(f'  {len(resuming)}本は途中から再開します: {shown}{more}')
 
-    # 5. ゲームごとに期間指定で収集し、1本ずつ追記する
+    # 5. ゲームごとに、ページ単位で追記しながら収集する
     print(f'\n[2/2] レビュー収集（{len(targets)}ゲーム）')
     total_rows = 0
     incomplete = []
@@ -471,40 +503,57 @@ def main():
         app_id, name = game['app_id'], game['name']
         log = {'app_id': app_id, 'name': name,
                'collected_at': dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        entry = progress.get(app_id, dict(NEW_ENTRY))
+        started = entry['rows']
+        reason = STOP_EXHAUSTED
         try:
-            reviews, reason = collect_natural_reviews(
-                app_id=app_id, since_ts=since_ts,
-                max_reviews=args.max_reviews_per_game, sleep=args.sleep,
-            )
+            for page, cursor, stop in iter_natural_reviews(
+                app_id=app_id, since_ts=since_ts, max_reviews=args.max_reviews_per_game,
+                sleep=args.sleep, start_cursor=entry['cursor'], collected=entry['rows'],
+            ):
+                # 追記 → 進捗保存の順を守る。逆にすると、その間に落ちたとき
+                # ページが1つ抜けたまま「取り切った」ことになり、後から気づけない
+                if page:
+                    append_rows(args.output, [dict(r, game_id=app_id, game_name=name)
+                                              for r in page])
+                entry = advance(entry, page, cursor)
+                progress[app_id] = entry
+                save_progress(args.progress_output, progress)
+                if stop:
+                    reason = stop
+                    break
         except Exception as exc:  # 1本失敗しても全体を止めない
-            print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} 失敗: {exc}")
-            append_log(args.log_output, dict(log, rows=0, oldest='', newest='',
+            print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} 失敗: {exc}"
+                  f"（{entry['rows']:,}件まで保存済み・次回はここから再開）")
+            append_log(args.log_output, dict(log, rows=entry['rows'], oldest='', newest='',
                                              coverage='partial', stop_reason=f'error: {exc}'))
             incomplete.append((name, f'error: {exc}'))
             continue
 
-        rows = [dict(r, game_id=app_id, game_name=name) for r in reviews]
-        append_rows(args.output, rows)
-        total_rows += len(rows)
+        total_rows += entry['rows'] - started
 
         # 期間を全部カバーできたかを判定する。直近しか取れていないゲームを黙って
         # 混ぜると、合算したときに「参加ゲームが増えただけの偽の成長」を作る
-        oldest = min((r['timestamp_created'] for r in reviews), default=0)
-        newest = max((r['timestamp_created'] for r in reviews), default=0)
-        coverage = judge_coverage(reason, oldest, since_ts, game.get('release_date', ''))
-        pos = sum(1 for r in reviews if r['voted_up'])
-        ratio = pos / len(reviews) if reviews else 0
+        coverage = judge_coverage(reason, entry['oldest'], since_ts,
+                                  game.get('release_date', ''))
+        ratio = entry['positives'] / entry['rows'] if entry['rows'] else 0
         append_log(args.log_output, dict(
-            log, rows=len(rows), oldest=fmt_date(oldest), newest=fmt_date(newest),
-            coverage=coverage, stop_reason=reason))
+            log, rows=entry['rows'], oldest=fmt_date(entry['oldest']),
+            newest=fmt_date(entry['newest']), coverage=coverage, stop_reason=reason))
+
+        # 取り切ったものだけ進捗を捨てる。未達のまま捨てると次回は先頭から取り直しになる
+        if coverage == 'ok':
+            progress.pop(app_id, None)
+        save_progress(args.progress_output, progress)
 
         note = ''
         if coverage != 'ok':
-            missing = (oldest - since_ts) / 86400 if oldest else 0
+            missing = (entry['oldest'] - since_ts) / 86400 if entry['oldest'] else 0
             note = f'  ⚠️ 期間未達（{missing:.0f}日分不足・{coverage}/{reason[:24]}）'
             incomplete.append((name, reason))
-        print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {len(rows):>6,d}件  "
-              f"ポジ率{ratio:>5.1%}  最古{fmt_date(oldest)}  （累計 {total_rows:,}件）{note}")
+        print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {entry['rows']:>6,d}件  "
+              f"ポジ率{ratio:>5.1%}  最古{fmt_date(entry['oldest'])}  "
+              f"（累計 {total_rows:,}件）{note}")
         time.sleep(args.sleep)
 
     print(f'\n✓ 完了: {total_rows:,}件 → {args.output}')
@@ -517,7 +566,7 @@ def main():
         print('  もう一度同じコマンドを実行すると、この分だけ収集し直す。')
     else:
         print('  全ゲームが指定期間を全部カバーできている')
-    print(f'\n次: python scripts/collect/inspect_timeseries_dataset.py で偏りを点検する')
+    print('\n次: python scripts/collect/inspect_timeseries_dataset.py で偏りを点検する')
 
 
 if __name__ == '__main__':

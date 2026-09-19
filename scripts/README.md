@@ -52,8 +52,28 @@ flowchart LR
 | `collect_dataset_20k.py` | 20000件のbalancedレビューを収集 |
 | `collect_ood_testset.py` | OOD評価用テストセット収集（未知20ゲーム・ジャンル/タグ偏り対策） |
 | `collect_dapt_corpus.py` | DAPT用の未ラベルコーパス収集（多様な10万件・OOD/学習ゲーム除外） |
-| `collect_timeseries_dataset.py` | 時系列予測用のレビュー収集（期間固定・自然比率・レビュー本文を保存）。母集団のメタ情報を `pool_cache.json` に貯めてから選定するため、条件を変えた選び直しは `--dry-run` で数秒。Issue #32 |
+| `collect_timeseries_dataset.py` | 時系列予測用のレビュー収集（期間固定・自然比率・レビュー本文を保存）。母集団のメタ情報を `pool_cache.json` に貯めてから選定するため、条件を変えた選び直しは `--dry-run` で数秒。**ページ単位で追記し、中断したゲームの途中から再開できる**（`--progress-output`）。Issue #32 |
 | `inspect_timeseries_dataset.py` | 収集した時系列データの偏り点検（収集の網羅性・自然比率・ゲーム別シェア・ジャンルの本数/量の乖離・参加ゲーム数の推移）。APIを叩かずCSVだけ読む |
+
+**時系列収集は途中から再開できます**（`collect_timeseries_dataset.py`）
+
+```mermaid
+flowchart LR
+    API(["Steam API"]) --> IT["iter_natural_reviews<br/>1ページずつ返す"]
+    IT --> AP["レビューを追記"]
+    AP --> SP["進捗を保存<br/>cursor・件数・最古・最新"]
+    SP --> IT
+    SP --> PJ[("collection_progress.json")]
+    AP --> RV[("reviews_timeseries.csv")]
+```
+
+**追記 → 進捗保存の順を守ります。** 逆にすると、その間に落ちたときページが1つ抜けたまま
+「取り切った」ことになり、後から気づけません。逆にこの順なら、落ちて生じるのは重複だけで、
+再開時に進捗の件数まで切り詰めれば正確に直ります。
+
+中断は安全です（`Ctrl+C` でも `kill` でも可）。同じコマンドをもう一度実行すれば、
+**そのゲームの途中から**続きます。取り切ったゲームだけ進捗を捨てるので、
+未達のまま先頭に戻されることはありません。
 
 **使用方法:**
 ```bash

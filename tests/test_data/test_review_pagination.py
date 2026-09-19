@@ -20,6 +20,7 @@ from src.data.steam_collector import (  # noqa: E402
     STOP_REACHED_NUM,
     STOP_REACHED_SINCE,
     _collect_reviews_paged,
+    iter_reviews_paged,
 )
 
 NOW = int(time.time())
@@ -147,6 +148,70 @@ def test_api_error_response_returns_partial(monkeypatch):
     reviews, reason = collect()
     assert len(reviews) == 1
     assert reason.startswith(STOP_ERROR)
+
+
+def iter_pages(**kwargs):
+    params = {'json': 1}
+    defaults = dict(app_id=1, params=params, num=1000, since_ts=SINCE,
+                    detailed=False, max_retries=1, sleep=0)
+    defaults.update(kwargs)
+    return list(iter_reviews_paged(**defaults))
+
+
+def test_generator_yields_one_entry_per_page(monkeypatch):
+    """ページごとに結果を返す（1本分を溜めてから返さない）"""
+    fake_api(monkeypatch, [
+        page([make_review(1)], cursor='c1'),
+        page([make_review(2)], cursor='c2'),
+        page([make_review(40)], cursor='c3'),  # 期間の先頭
+    ])
+    got = iter_pages()
+    assert [len(rows) for rows, _, _ in got] == [1, 1, 0]
+    assert [c for _, c, _ in got][:2] == ['c1', 'c2']
+
+
+def test_generator_reports_reason_only_on_last_yield(monkeypatch):
+    """停止理由は最後の1回だけ入る（途中はNone）"""
+    fake_api(monkeypatch, [
+        page([make_review(1)], cursor='c1'),
+        page([make_review(40)], cursor='c2'),
+    ])
+    reasons = [r for _, _, r in iter_pages()]
+    assert reasons[:-1] == [None] * (len(reasons) - 1)
+    assert reasons[-1] == STOP_REACHED_SINCE
+
+
+def test_start_cursor_is_sent_to_the_api(monkeypatch):
+    """再開位置のcursorが最初のリクエストに乗る"""
+    sent = []
+
+    def _request(*args, **kwargs):
+        sent.append(kwargs['params']['cursor'])
+        return FakeResponse(page([make_review(40)], cursor='cX'))
+
+    monkeypatch.setattr('src.data.steam_collector.request_with_backoff', _request)
+    iter_pages(start_cursor='resume-here')
+    assert sent[0] == 'resume-here'
+
+
+def test_collected_counts_toward_the_limit(monkeypatch):
+    """再開時は既に取った件数も上限に数える（取りすぎを防ぐ）"""
+    fake_api(monkeypatch, [page([make_review(1), make_review(2)], cursor='c1')])
+    got = iter_pages(num=3, collected=2)
+    # 残り1件だけ取って上限に達する
+    assert sum(len(rows) for rows, _, _ in got) == 1
+    assert got[-1][2] == STOP_REACHED_NUM
+
+
+def test_resuming_from_cursor_continues_the_sequence(monkeypatch):
+    """中断したcursorから再開すると、続きのページが取れる"""
+    fake_api(monkeypatch, [
+        page([make_review(2)], cursor='c2'),
+        page([make_review(40)], cursor='c3'),
+    ])
+    got = iter_pages(start_cursor='c1', collected=1)
+    assert sum(len(rows) for rows, _, _ in got) == 1
+    assert got[-1][2] == STOP_REACHED_SINCE
 
 
 if __name__ == '__main__':
