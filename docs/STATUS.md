@@ -617,7 +617,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **需要側24本＋供給側354本タグまで実測済み。次は需要と供給の突き合わせ** |
 
-**`feature/tag-vocabulary` で作業中**（#45 の準備）。
+**PR #47 マージ済み**（#45 の中心部分）。**次の作業は `main` から新しいブランチを切ること。**
 **次は #45 の残り（どのタグを①とするかの基準）→ #42 の共起を64本で引き直す。**
 
 **PR #44 マージ済み**（#42 の需要側＋供給側の検証）。
