@@ -499,9 +499,8 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **需要側24本＋供給側354本タグまで実測済み。次は需要と供給の突き合わせ** |
 
-**`feature/resumable-collection` で作業中**（収集の中断・再開 ＋ 既存を固定した追加）。
-これが入れば**ロスター拡大に着手できる**。まず閾値2のまま64本まで広げ、
-「本数が効く」仮説を需要側で検証してから、タグ重なりを緩めるか決める。
+**PR #46 マージ済み**（収集の中断・再開 ＋ 既存を固定した追加 ＋ 64本への拡大）。
+**次の作業は `main` から新しいブランチを切ること。**
 
 **PR #44 マージ済み**（#42 の需要側＋供給側の検証）。
 **次はロスター拡大**（→ `docs/decisions.md` 2026-09-20）。その前提として、収集にページ単位の途中保存と再開を入れる。
