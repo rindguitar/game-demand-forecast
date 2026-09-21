@@ -14,10 +14,11 @@ from langdetect import DetectorFactory
 DetectorFactory.seed = 0  # 再現性のために固定
 
 # Steam APIアクセス時のブラウザUA（データセンターIPからのブロック回避）
+# 自動アクセスであることを隠さない。ブラウザを騙る必要は実測で無かった
+# （正直な名乗りでも python-urllib 既定でも HTTP 200 で同じ内容が返る）
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                  'AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/120.0 Safari/537.36'
+    'User-Agent': 'game-demand-forecast/1.0 '
+                  '(+https://github.com/rindguitar/game-demand-forecast)'
 }
 
 
