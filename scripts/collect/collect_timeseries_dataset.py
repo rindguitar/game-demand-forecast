@@ -43,10 +43,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 from src.data.steam_collector import (  # noqa: E402
     STOP_EXHAUSTED,
     STOP_REACHED_SINCE,
-    collect_natural_reviews,
     get_popular_games,
     get_release_date,
     get_review_summary,
+    iter_natural_reviews,
+)
+from src.data.collection_progress import (  # noqa: E402
+    NEW_ENTRY,
+    advance,
+    load_progress,
+    save_progress,
 )
 from collect_ood_testset import (  # noqa: E402
     TAG_NOISE,
@@ -122,11 +128,18 @@ def load_collected_ids(path: str, log_path: str) -> set:
     return in_csv
 
 
-def drop_game_rows(path: str, app_ids: set) -> int:
-    """再収集するゲームの行を出力CSVから取り除く（重複追記を防ぐ）"""
-    if not app_ids or not os.path.exists(path):
+def trim_game_rows(path: str, keep: dict) -> int:
+    """指定したゲームの行を、先頭 keep 件だけ残して切り詰める
+
+    追記方式なので、取り直すゲームの古い行は消す必要がある（keep が0）。
+    途中から再開するゲームは、進捗に記録された行数までは正しいので残す。
+    記録より先の行は「追記はしたが進捗を保存する前に落ちた」分で、
+    そのまま再開すると二重になる。切り詰めれば正確に直る。
+    """
+    if not keep or not os.path.exists(path):
         return 0
     tmp = path + '.tmp'
+    seen = {app_id: 0 for app_id in keep}
     removed = 0
     with open(path, encoding='utf-8') as src, \
             open(tmp, 'w', newline='', encoding='utf-8') as dst:
@@ -134,9 +147,12 @@ def drop_game_rows(path: str, app_ids: set) -> int:
         writer = csv.DictWriter(dst, fieldnames=FIELDS, extrasaction='ignore')
         writer.writeheader()
         for row in reader:
-            if row.get('game_id') and int(row['game_id']) in app_ids:
-                removed += 1
-                continue
+            app_id = int(row['game_id']) if row.get('game_id') else None
+            if app_id in seen:
+                if seen[app_id] >= keep[app_id]:
+                    removed += 1
+                    continue
+                seen[app_id] += 1
             writer.writerow(row)
     os.replace(tmp, path)
     return removed
@@ -196,12 +212,21 @@ def save_game_master(path: str, games: list) -> None:
                                  tags='|'.join(sorted(g['tags']))))
 
 
+# 台帳のうち数値として読み戻す列（CSVは全部文字列で返るため）
+GAME_INT_FIELDS = ('app_id', 'total_reviews', 'total_positive', 'total_negative')
+
+
 def load_game_master(path: str) -> list:
-    """保存済みの台帳を読む（選定をやり直さず、同じ24本を収集し直すため）"""
+    """保存済みの台帳を読む（選定をやり直さず、同じ顔ぶれを収集し直すため）
+
+    件数は数値に戻す。文字列のままだと母集団から選んだゲームと型が食い違い、
+    既存を固定して追加するとき（--extend）に表示や集計で落ちる。
+    """
     with open(path, encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
     for r in rows:
-        r['app_id'] = int(r['app_id'])
+        for field in GAME_INT_FIELDS:
+            r[field] = int(r[field]) if str(r.get(field, '')).strip() else 0
         r['genres'] = set(filter(None, r.get('genres', '').split('|')))
         r['tags'] = set(filter(None, r.get('tags', '').split('|')))
     return rows
@@ -292,7 +317,8 @@ def build_pool(args) -> list:
     return pool
 
 
-def select_from_pool(pool: list, window_start: str, min_history: str, args) -> tuple:
+def select_from_pool(pool: list, window_start: str, min_history: str, args,
+                     existing: list = None) -> tuple:
     """
     収集する対象を選ぶ。3つの条件を同時に満たす組を作る
 
@@ -307,14 +333,26 @@ def select_from_pool(pool: list, window_start: str, min_history: str, args) -> t
     希少なジャンルから先に埋める。頻出ジャンルから埋めると枠を使い切ってしまい、
     Racing や Sports の番が来たときに残りが無くなる。
 
+    Args:
+        existing: 既に選んである台帳。渡すと**そのまま固定**して残りだけを足す。
+            3つの条件は既存分も数えたうえで判定するので、既存と似たゲームは入らない。
+            条件は緩める方向にしか動かさない限り、既存の選定はいつでも有効なまま
+            （厳しい条件を満たす集合は、緩い条件も満たす）。足すのは常に追加になる
+
     Returns:
-        (選んだゲームのリスト, ジャンル別の本数)
+        (選んだゲームのリスト, ジャンル別の本数)。existing を渡した場合は既存を含む全体
     """
+    fixed = [dict(g, backbone=g['release_date'] <= window_start) for g in (existing or [])]
+    taken = {g['app_id'] for g in fixed}
     candidates = [dict(g, backbone=g['release_date'] <= window_start)
-                  for g in pool if g['release_date'] <= min_history]
+                  for g in pool
+                  if g['release_date'] <= min_history and g['app_id'] not in taken]
     random.Random(args.seed).shuffle(candidates)
 
-    selected, genre_counts = [], {}
+    selected, genre_counts = list(fixed), {}
+    for g in fixed:
+        for x in g['genres']:
+            genre_counts[x] = genre_counts.get(x, 0) + 1
 
     def acceptable(game):
         if game['backbone'] and sum(1 for g in selected if g['backbone']) >= args.max_backbone:
@@ -390,6 +428,8 @@ def main():
                         help='母集団のメタ情報のキャッシュ。2回目以降はAPIを叩かない')
     parser.add_argument('--refresh-pool', action='store_true',
                         help='母集団の一覧を取り直す（売上上位は日々入れ替わる）')
+    parser.add_argument('--extend', action='store_true',
+                        help='既存の台帳を固定したまま --n-games 本まで追加する')
     parser.add_argument('--reselect', action='store_true',
                         help='既存の台帳を捨ててゲームを選び直す')
     parser.add_argument('--dry-run', action='store_true',
@@ -405,6 +445,9 @@ def main():
     parser.add_argument('--output', default='data/timeseries/reviews_timeseries.csv')
     parser.add_argument('--games-output', default='data/timeseries/games.csv',
                         help='選んだゲームの台帳（ジャンル・タグ・累計レビュー数）')
+    parser.add_argument('--progress-output',
+                        default='data/timeseries/collection_progress.json',
+                        help='収集の途中経過（どのcursorまで取ったか）の保存先')
     parser.add_argument('--log-output', default='data/timeseries/collection_log.csv',
                         help='ゲーム別の収集結果（期間を全部カバーできたかの記録）')
     args = parser.parse_args()
@@ -422,34 +465,62 @@ def main():
 
     # 1. 収集済みを確認（中断からの再開）
     already = load_collected_ids(args.output, args.log_output)
+    # 進捗が残っているゲームは定義上「未完了」。収集ログがまだ無い場合の
+    # フォールバック（CSVに行があれば収集済みとみなす）に飲み込まれないよう、先に外す
+    progress = load_progress(args.progress_output)
+    resumable = already & set(progress)
+    if resumable:
+        already -= resumable
+        print(f'  {len(resumable)}ゲームは収集の途中なので、収集済みから外します')
     if already:
         print(f'\n期間を全部カバーできた {len(already)}ゲームをスキップします')
 
     # 2. 収集対象を決める。台帳があればそれを使う（実行のたびに顔ぶれが変わらないように）
-    if os.path.exists(args.games_output) and not args.reselect:
-        games = load_game_master(args.games_output)
-        print(f'\n[1/2] 既存の台帳を使用: {len(games)}本（選び直すなら --reselect）')
+    today = dt.datetime.now(dt.timezone.utc).date()
+    window_start = since_date.isoformat()
+    min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
+    recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+
+    existing = (load_game_master(args.games_output)
+                if os.path.exists(args.games_output) and not args.reselect else [])
+    if existing and not (args.extend and len(existing) < args.n_games):
+        games = existing
+        print(f'\n[1/2] 既存の台帳を使用: {len(games)}本'
+              f'（選び直すなら --reselect / 足すなら --extend）')
     else:
-        print('\n[1/2] ゲーム選定')
-        today = dt.datetime.now(dt.timezone.utc).date()
-        window_start = since_date.isoformat()
-        min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
-        recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+        if existing:
+            print(f'\n[1/2] ゲーム選定（既存{len(existing)}本を固定して'
+                  f'{args.n_games}本まで追加）')
+        else:
+            print('\n[1/2] ゲーム選定')
 
         pool = build_pool(args)
-        games, genre_counts = select_from_pool(pool, window_start, min_history, args)
+        games, genre_counts = select_from_pool(pool, window_start, min_history, args,
+                                               existing=existing)
         if not games:
             print('  条件を満たすゲームが見つかりませんでした')
             return
+        added = len(games) - len(existing)
+        if existing and not added:
+            print('  ⚠️ 条件を満たす追加ゲームがありませんでした。'
+                  '--max-per-genre / --tag-overlap-threshold を緩めてください')
+
+        # 既存の tier は作り直さない。ウィンドウは実行日で動くので、
+        # 再計算すると既に引いた時系列パネルの顔ぶれが変わってしまう
         for g in games:
-            g['tier'] = ('土台' if g['release_date'] <= window_start
-                         else '直近' if g['release_date'] > recent_from else '中間')
+            if not g.get('tier'):
+                g['tier'] = ('土台' if g['release_date'] <= window_start
+                             else '直近' if g['release_date'] > recent_from else '中間')
         report_selection(games, genre_counts, pool, args)
-        save_game_master(args.games_output, games)
-        print(f'  台帳を保存: {args.games_output}')
+        # --dry-run は「顔ぶれだけ見る」ためのものなので台帳を書き換えない。
+        # 書き換えると、条件を試すだけのつもりが収集対象を変えてしまう
+        if not args.dry_run:
+            save_game_master(args.games_output, games)
+            note = f'（既存{len(existing)}本 + 追加{added}本）' if existing else ''
+            print(f'  台帳を保存: {args.games_output}{note}')
 
     if args.dry_run:
-        print('\n--dry-run のため収集は行わない')
+        print('\n--dry-run のため、台帳の保存も収集も行わない')
         return
 
     # 3. まだ期間を全部カバーできていないゲームだけを収集する
@@ -458,12 +529,18 @@ def main():
         print('\n全ゲームが期間を全部カバー済み。収集するものはありません')
         return
 
-    # 4. 再収集するゲームの古い行を消す（追記方式なので放置すると二重になる）
-    removed = drop_game_rows(args.output, {g['app_id'] for g in targets})
+    # 4. 再開の準備。進捗があるゲームはそこから続け、無いゲームは古い行を消して取り直す
+    keep = {g['app_id']: progress.get(g['app_id'], NEW_ENTRY)['rows'] for g in targets}
+    removed = trim_game_rows(args.output, keep)
+    resuming = [g for g in targets if keep.get(g['app_id'])]
     if removed:
-        print(f'  再収集のため既存 {removed:,}行を削除')
+        print(f'  既存 {removed:,}行を整理しました')
+    if resuming:
+        shown = ', '.join(g['name'][:20] for g in resuming[:3])
+        more = f' ほか{len(resuming) - 3}本' if len(resuming) > 3 else ''
+        print(f'  {len(resuming)}本は途中から再開します: {shown}{more}')
 
-    # 5. ゲームごとに期間指定で収集し、1本ずつ追記する
+    # 5. ゲームごとに、ページ単位で追記しながら収集する
     print(f'\n[2/2] レビュー収集（{len(targets)}ゲーム）')
     total_rows = 0
     incomplete = []
@@ -471,40 +548,57 @@ def main():
         app_id, name = game['app_id'], game['name']
         log = {'app_id': app_id, 'name': name,
                'collected_at': dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        entry = progress.get(app_id, dict(NEW_ENTRY))
+        started = entry['rows']
+        reason = STOP_EXHAUSTED
         try:
-            reviews, reason = collect_natural_reviews(
-                app_id=app_id, since_ts=since_ts,
-                max_reviews=args.max_reviews_per_game, sleep=args.sleep,
-            )
+            for page, cursor, stop in iter_natural_reviews(
+                app_id=app_id, since_ts=since_ts, max_reviews=args.max_reviews_per_game,
+                sleep=args.sleep, start_cursor=entry['cursor'], collected=entry['rows'],
+            ):
+                # 追記 → 進捗保存の順を守る。逆にすると、その間に落ちたとき
+                # ページが1つ抜けたまま「取り切った」ことになり、後から気づけない
+                if page:
+                    append_rows(args.output, [dict(r, game_id=app_id, game_name=name)
+                                              for r in page])
+                entry = advance(entry, page, cursor)
+                progress[app_id] = entry
+                save_progress(args.progress_output, progress)
+                if stop:
+                    reason = stop
+                    break
         except Exception as exc:  # 1本失敗しても全体を止めない
-            print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} 失敗: {exc}")
-            append_log(args.log_output, dict(log, rows=0, oldest='', newest='',
+            print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} 失敗: {exc}"
+                  f"（{entry['rows']:,}件まで保存済み・次回はここから再開）")
+            append_log(args.log_output, dict(log, rows=entry['rows'], oldest='', newest='',
                                              coverage='partial', stop_reason=f'error: {exc}'))
             incomplete.append((name, f'error: {exc}'))
             continue
 
-        rows = [dict(r, game_id=app_id, game_name=name) for r in reviews]
-        append_rows(args.output, rows)
-        total_rows += len(rows)
+        total_rows += entry['rows'] - started
 
         # 期間を全部カバーできたかを判定する。直近しか取れていないゲームを黙って
         # 混ぜると、合算したときに「参加ゲームが増えただけの偽の成長」を作る
-        oldest = min((r['timestamp_created'] for r in reviews), default=0)
-        newest = max((r['timestamp_created'] for r in reviews), default=0)
-        coverage = judge_coverage(reason, oldest, since_ts, game.get('release_date', ''))
-        pos = sum(1 for r in reviews if r['voted_up'])
-        ratio = pos / len(reviews) if reviews else 0
+        coverage = judge_coverage(reason, entry['oldest'], since_ts,
+                                  game.get('release_date', ''))
+        ratio = entry['positives'] / entry['rows'] if entry['rows'] else 0
         append_log(args.log_output, dict(
-            log, rows=len(rows), oldest=fmt_date(oldest), newest=fmt_date(newest),
-            coverage=coverage, stop_reason=reason))
+            log, rows=entry['rows'], oldest=fmt_date(entry['oldest']),
+            newest=fmt_date(entry['newest']), coverage=coverage, stop_reason=reason))
+
+        # 取り切ったものだけ進捗を捨てる。未達のまま捨てると次回は先頭から取り直しになる
+        if coverage == 'ok':
+            progress.pop(app_id, None)
+        save_progress(args.progress_output, progress)
 
         note = ''
         if coverage != 'ok':
-            missing = (oldest - since_ts) / 86400 if oldest else 0
+            missing = (entry['oldest'] - since_ts) / 86400 if entry['oldest'] else 0
             note = f'  ⚠️ 期間未達（{missing:.0f}日分不足・{coverage}/{reason[:24]}）'
             incomplete.append((name, reason))
-        print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {len(rows):>6,d}件  "
-              f"ポジ率{ratio:>5.1%}  最古{fmt_date(oldest)}  （累計 {total_rows:,}件）{note}")
+        print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {entry['rows']:>6,d}件  "
+              f"ポジ率{ratio:>5.1%}  最古{fmt_date(entry['oldest'])}  "
+              f"（累計 {total_rows:,}件）{note}")
         time.sleep(args.sleep)
 
     print(f'\n✓ 完了: {total_rows:,}件 → {args.output}')
@@ -517,7 +611,7 @@ def main():
         print('  もう一度同じコマンドを実行すると、この分だけ収集し直す。')
     else:
         print('  全ゲームが指定期間を全部カバーできている')
-    print(f'\n次: python scripts/collect/inspect_timeseries_dataset.py で偏りを点検する')
+    print('\n次: python scripts/collect/inspect_timeseries_dataset.py で偏りを点検する')
 
 
 if __name__ == '__main__':

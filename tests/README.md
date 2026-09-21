@@ -73,6 +73,8 @@ make test-topic     # トピック抽出テストのみ
 | `test_filtering.py` | `src/data/steam_collector.py` | langdetectフィルタリングの段階別検証（フィルタリング前後の比較） |
 | `test_preprocessing.py` | `src/data/preprocessing.py` | テキスト前処理の動作確認 |
 | `test_pool_tags.py` | `src/data/pool_tags.py` | 母集団キャッシュからのタグ読み出し・欠損の扱い |
+| `test_collection_progress.py` | `src/data/collection_progress.py` | 進捗の保存と読み出し・統計を流しながら集計すること |
+| `test_review_pagination.py` | `src/data/steam_collector.py` | ページングの停止条件・ページ単位の取得・cursorからの再開 |
 
 > **注意**: `test_steam_collector.py` と `test_filtering.py` は実際にSteam APIを呼び出すため、実行には `.env` のAPIキー設定が必要です。
 
@@ -91,6 +93,9 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出・パネルの密度と集中度 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
+| `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
+| `test_collection_coverage.py` | `scripts/collect/collect_timeseries_dataset.py` | 収集の網羅性判定（直近しか無いゲームと、直近しか取れなかったゲームの区別） |
+| `test_row_trimming.py` | `scripts/collect/collect_timeseries_dataset.py` | 再収集・再開時のCSV切り詰め（重複を残さず、記録済みの行は消さないこと） |
 
 ---
 

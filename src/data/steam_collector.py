@@ -273,41 +273,64 @@ STOP_EXHAUSTED = 'exhausted'           # APIがこれ以上返さない
 STOP_ERROR = 'error'                   # リクエスト失敗が続いた
 
 
-def _collect_reviews_paged(
+def _natural_review_params(language: str) -> dict:
+    """自然比率の収集で使うAPIクエリ（まとめ取りとページ単位版で同じものを使う）"""
+    return {
+        'json': 1,
+        'language': language,
+        'filter': 'recent',
+        'review_type': 'all',
+        'purchase_type': 'all',
+        'num_per_page': 100,
+    }
+
+
+def _check_since(since_ts: int) -> None:
+    """期間の指定が無いまま集めると、件数上限まで無限に遡ってしまう"""
+    if since_ts <= 0:
+        raise ValueError(f"Invalid since_ts: {since_ts}. Must be a positive Unix timestamp")
+
+
+def iter_reviews_paged(
     app_id: int,
-    params: Dict,
+    params: dict,
     num: int,
     since_ts: int,
     detailed: bool,
     max_retries: int,
     empty_retries: int = 3,
     sleep: float = 0.5,
-) -> Tuple[List[Dict], str]:
+    start_cursor: str = '*',
+    collected: int = 0,
+):
     """
-    cursorページングでレビューを集め、「なぜ止まったか」も返す
+    cursorページングでレビューを集め、**1ページごとに** 結果を返すジェネレータ
 
     Steamは連続アクセスに対し、エラーではなく**空ページ**を返して黙って打ち切る
     ことがある。これを終端と解釈すると期間の途中で切れたデータが混ざるため
     （実測で15本中6本が該当）、空ページは待って同じcursorでやり直す。
 
-    Args:
-        params: APIクエリパラメータ（cursorは本関数が書き換える）
-        empty_retries: 空ページを何回まで待ってやり直すか
-        sleep: ページ間の待機秒数
+    ページ単位で返すのは、収集の途中経過を保存できるようにするため。
+    1ゲーム分を溜めてから返すと、中断や例外で進行中のゲームが丸ごと消え、
+    大きいゲームではメモリも件数に比例して膨らむ。
 
-    Returns:
-        (レビューのリスト, 停止理由)。停止理由は STOP_* のいずれか。
-        途中で失敗した場合も、取れた分は捨てずに返す
+    Args:
+        start_cursor: 再開位置。'*' が先頭
+        collected: 再開時に既に取得済みの件数（num の判定に使う）
+
+    Yields:
+        (そのページのレビュー, 次のcursor, 停止理由)。停止理由は続く限り None で、
+        最後の1回だけ STOP_* が入る。次のcursorを保存しておけば、そこから再開できる
     """
     base_url = "https://store.steampowered.com/appreviews/"
     page_size = params.get('num_per_page', 100)
-    reviews: List[Dict] = []
-    cursor = '*'
+    total = collected
+    cursor = start_cursor
     seen_cursors = set()
     empty_streak = 0
     last_page_size = 0
 
-    while len(reviews) < num:
+    while total < num:
         params['cursor'] = cursor
 
         # 1. 1ページ取得（429等は request_with_backoff 側でリトライ済み）
@@ -317,10 +340,12 @@ def _collect_reviews_paged(
             )
             data = response.json()
         except (requests.exceptions.RequestException, ValueError) as exc:
-            return reviews, f'{STOP_ERROR}: {exc}'
+            yield [], cursor, f'{STOP_ERROR}: {exc}'
+            return
 
         if data.get('success') != 1:
-            return reviews, f"{STOP_ERROR}: success={data.get('error', data.get('success'))}"
+            yield [], cursor, f"{STOP_ERROR}: success={data.get('error', data.get('success'))}"
+            return
 
         # 2. 空ページは、待って同じcursorをやり直す。
         #    直前が満杯のページなら「まだ続きがあるのに空が返った」＝レート制限を疑い、
@@ -330,7 +355,8 @@ def _collect_reviews_paged(
             empty_streak += 1
             limit = empty_retries if last_page_size >= page_size else 1
             if empty_streak > limit:
-                return reviews, STOP_EXHAUSTED
+                yield [], cursor, STOP_EXHAUSTED
+                return
             time.sleep(min(45.0, sleep * 10 * (3 ** (empty_streak - 1))))
             continue
         empty_streak = 0
@@ -338,13 +364,15 @@ def _collect_reviews_paged(
 
         # 3. レビューを取り出す。filter=recent は新しい順なので、
         #    since_ts より古いものが出た時点で以降はすべて範囲外
+        page: List[Dict] = []
         for review in api_reviews:
-            if len(reviews) >= num:
+            if total + len(page) >= num:
                 break
 
             created = review.get('timestamp_created', 0)
             if since_ts and created < since_ts:
-                return reviews, STOP_REACHED_SINCE
+                yield page, cursor, STOP_REACHED_SINCE
+                return
 
             review_text = review.get('review', '')
             if not is_valid_english_review(review_text):
@@ -360,17 +388,54 @@ def _collect_reviews_paged(
             }
             if detailed:
                 record.update(_extract_detail_fields(review))
-            reviews.append(record)
+            page.append(record)
+
+        total += len(page)
 
         # 4. 次のページへ。cursorが無い・同じcursorが返るのは終端
-        cursor = data.get('cursor')
-        if not cursor or cursor in seen_cursors:
-            return reviews, STOP_EXHAUSTED
-        seen_cursors.add(cursor)
+        next_cursor = data.get('cursor')
+        if not next_cursor or next_cursor in seen_cursors:
+            yield page, next_cursor or cursor, STOP_EXHAUSTED
+            return
+        seen_cursors.add(next_cursor)
 
+        yield page, next_cursor, None
+        cursor = next_cursor
         time.sleep(sleep)  # Rate limiting: Steam APIを尊重
 
-    return reviews, STOP_REACHED_NUM
+    yield [], cursor, STOP_REACHED_NUM
+
+
+def _collect_reviews_paged(
+    app_id: int,
+    params: dict,
+    num: int,
+    since_ts: int,
+    detailed: bool,
+    max_retries: int,
+    empty_retries: int = 3,
+    sleep: float = 0.5,
+) -> Tuple[List[Dict], str]:
+    """
+    1ゲーム分をまとめて集める（iter_reviews_paged を全部消費するだけ）
+
+    途中経過を保存したい呼び出し側は iter_reviews_paged を直接使うこと。
+
+    Returns:
+        (レビューのリスト, 停止理由)。停止理由は STOP_* のいずれか。
+        途中で失敗した場合も、取れた分は捨てずに返す
+    """
+    reviews: List[Dict] = []
+    reason = STOP_EXHAUSTED
+    for page, _cursor, stop in iter_reviews_paged(
+        app_id=app_id, params=params, num=num, since_ts=since_ts, detailed=detailed,
+        max_retries=max_retries, empty_retries=empty_retries, sleep=sleep,
+    ):
+        reviews.extend(page)
+        if stop:
+            reason = stop
+            break
+    return reviews, reason
 
 
 def get_steam_reviews(
@@ -529,18 +594,35 @@ def collect_natural_reviews(
         >>> since = int(time.time()) - 3 * 365 * 86400  # 直近3年
         >>> reviews, reason = collect_natural_reviews(app_id=413150, since_ts=since)
     """
-    if since_ts <= 0:
-        raise ValueError(f"Invalid since_ts: {since_ts}. Must be a positive Unix timestamp")
-
-    params = {
-        'json': 1,
-        'language': language,
-        'filter': 'recent',
-        'review_type': 'all',
-        'purchase_type': 'all',
-        'num_per_page': 100,
-    }
+    _check_since(since_ts)
     return _collect_reviews_paged(
-        app_id=app_id, params=params, num=max_reviews, since_ts=since_ts,
-        detailed=True, max_retries=max_retries, sleep=sleep,
+        app_id=app_id, params=_natural_review_params(language), num=max_reviews,
+        since_ts=since_ts, detailed=True, max_retries=max_retries, sleep=sleep,
+    )
+
+
+def iter_natural_reviews(
+    app_id: int,
+    since_ts: int,
+    language: str = 'english',
+    max_reviews: int = 200000,
+    max_retries: int = 5,
+    sleep: float = 0.5,
+    start_cursor: str = '*',
+    collected: int = 0,
+):
+    """
+    collect_natural_reviews のページ単位版
+
+    途中経過を保存したい呼び出し側はこちらを使う。`start_cursor` と `collected` に
+    前回の続きを渡せば、中断したところから再開できる。
+
+    Yields:
+        (そのページのレビュー, 次のcursor, 停止理由)。詳細は iter_reviews_paged を参照
+    """
+    _check_since(since_ts)
+    return iter_reviews_paged(
+        app_id=app_id, params=_natural_review_params(language), num=max_reviews,
+        since_ts=since_ts, detailed=True, max_retries=max_retries, sleep=sleep,
+        start_cursor=start_cursor, collected=collected,
     )

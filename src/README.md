@@ -85,6 +85,7 @@ flowchart LR
 | `preprocessing.py` | レビューテキストのクリーニング・前処理 |
 | `dataset_split.py` | Train/Val/Testへの分割ユーティリティ（stratify対応） |
 | `pool_tags.py` | 母集団キャッシュ（`pool_cache.json`）からSteamのユーザータグを読む |
+| `collection_progress.py` | レビュー収集の途中経過（どのcursorまで取ったか）の保存と再開 |
 
 **主要関数:**
 - `get_steam_reviews(app_id, language, review_type, num)` — レビュー収集
@@ -92,6 +93,10 @@ flowchart LR
 - `is_valid_english_review(text)` — 英語判定（ASCII・langdetect）
 - `load_pool_tags(path, min_tags, only_games)` — ゲーム × タグの縦長を作る。
   タグは**供給の信号**（市場が何を出荷したか）で、レビューを集めていないゲームについても取れる
+- `iter_natural_reviews(app_id, since_ts, ..., start_cursor, collected)` —
+  `collect_natural_reviews` のページ単位版。`start_cursor` に前回の続きを渡せば途中から再開できる
+- `advance(entry, page, cursor)`（`collection_progress.py`）— 件数・最古・最新・ポジ数を
+  流しながら集計する。カバー率の判定にはこれだけあれば足り、全レビューをメモリに残さずに済む
 
 ---
 
