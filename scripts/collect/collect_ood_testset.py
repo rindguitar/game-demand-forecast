@@ -68,6 +68,7 @@ TAG_NOISE = {
     'Multiplayer', 'Co-op', 'Online Co-Op', 'Local Co-Op', 'PvP', 'PvE',
 }
 
+
 def get_game_genres(app_id: int) -> frozenset:
     """
     Steam公式のappdetails APIからゲームのジャンル集合を取得
@@ -101,7 +102,7 @@ def get_game_genres(app_id: int) -> frozenset:
                      if isinstance(g, dict) and 'description' in g)
 
 
-def get_game_tags(app_id: int, n_tags: int = 6) -> list:
+def get_game_tags(app_id: int, n_tags: int = 20) -> list:
     """
     Steam storeページからユーザータグ（上位n_tags個）を取得
 
@@ -111,7 +112,7 @@ def get_game_tags(app_id: int, n_tags: int = 6) -> list:
 
     Args:
         app_id: SteamのアプリID
-        n_tags: 取得する上位タグ数
+        n_tags: 取得する上位タグ数（ストアページが埋め込むのは20個が上限）
 
     Returns:
         上位n_tags個のタグ名リスト（取得失敗時は空リスト）
@@ -165,7 +166,7 @@ def main():
     random.shuffle(candidates)
 
     # 2. 各ゲームから条件付き収集
-    print(f"\n[2/3] 条件付き収集（ジャンル偏り対策＋タグ重なり除外＋P/N両方が目標数取れたゲームのみ採用）...")
+    print("\n[2/3] 条件付き収集（ジャンル偏り対策＋タグ重なり除外＋P/N両方が目標数取れたゲームのみ採用）...")
     print(f"   ジャンル上限: 1ジャンルあたり最大{args.max_per_genre}本 / "
           f"同一プロファイル最大{args.max_per_profile}本")
     print(f"   タグ重なり: 上位{args.n_tags}タグ中{args.tag_overlap_threshold}個以上共通で弾く")
@@ -190,7 +191,7 @@ def main():
 
         real_genres = genres - NOISE_TAGS  # ノイズタグ(Indie等)を除去
         if not real_genres:
-            print(f"    ⚠️ 有効なジャンルなし → スキップ")
+            print("    ⚠️ 有効なジャンルなし → スキップ")
             continue
 
         # (a) 完全一致dedup: 同じジャンルプロファイルは max_per_profile 本まで
@@ -265,7 +266,7 @@ def main():
               f"ジャンル={sorted(real_genres)} タグ={sorted(real_tags)}")
 
     # 3. 保存
-    print(f"\n[3/3] 保存...")
+    print("\n[3/3] 保存...")
     df = pd.DataFrame(all_reviews)
     df = df.sample(frac=1, random_state=args.seed).reset_index(drop=True)
 
@@ -293,7 +294,7 @@ def main():
         print(f"   Positive: {(df['sentiment']==1).sum()} / Negative: {(df['sentiment']==0).sum()}")
     print(f"   保存先: {args.output}")
 
-    print(f"\n【採用ゲーム一覧】")
+    print("\n【採用ゲーム一覧】")
     for aid, name, genres, tags in collected_games:
         print(f"  - {name} ({aid}) ジャンル={genres} タグ={sorted(tags)}")
 

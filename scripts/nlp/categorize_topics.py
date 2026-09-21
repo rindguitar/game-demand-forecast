@@ -24,6 +24,8 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.timeseries.weekly import measure_topic_panels  # noqa: E402
+from src.data.pool_tags import load_pool  # noqa: E402
+from src.nlp.tag_semantics import element_tags, match_terms  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
     CATEGORY_LABELS,
     ELEMENT,
@@ -32,13 +34,15 @@ from src.nlp.topic_category import (  # noqa: E402
     CONTENTLESS,
     PROPERNOUN,
     AMBIGUOUS,
+    UNCLASSIFIED,
     classify_topics,
     format_hits,
     load_category_words,
 )
 
 # 表示の並び順（要素を先頭に置く）
-CATEGORY_ORDER = [ELEMENT, QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN, AMBIGUOUS]
+CATEGORY_ORDER = [ELEMENT, QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN,
+                  AMBIGUOUS, UNCLASSIFIED]
 
 
 def parse_args():
@@ -52,6 +56,12 @@ def parse_args():
                         help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列から取る')
     parser.add_argument('--categories', default='configs/topic_categories.txt',
                         help='分類語彙のファイル')
+    parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
+                        help='①の語彙にするSteamタグの取得元。空文字なら意味の照合をしない')
+    parser.add_argument('--strong-element', type=float, default=None,
+                        help='タグとの近さがこれ以上なら①で確定（既定は topic_category の値）')
+    parser.add_argument('--weak-element', type=float, default=None,
+                        help='タグとの近さがこれ以上なら①に1票（既定は topic_category の値）')
     parser.add_argument('--output', default=None,
                         help='出力CSV（未指定なら統計と同ディレクトリの topic_categories.csv）')
     parser.add_argument('--min-per-week', type=float, default=10.0,
@@ -94,9 +104,24 @@ def main():
     category_words = load_category_words(args.categories)
     loaded = {c: len(w) for c, w in category_words.items()}
     print(f"分類語彙: {loaded}（{args.categories}）")
-    classified = classify_topics(list(zip(stats['topic_id'], stats['keywords'])), category_words)
+    # 2b. ①の証拠として、タグとの意味の近さも測る（文字列照合では拾えない形の証拠）
+    element_scores, best_tags = {}, {}
+    if args.pool:
+        tags = element_tags(load_pool(args.pool))
+        matched = match_terms(list(stats['keywords']), tags)
+        for topic_id, (tag, score) in zip(stats['topic_id'], matched):
+            element_scores[topic_id], best_tags[topic_id] = score, tag
+        print(f'タグとの意味の照合: {len(tags)}語（{args.pool}）')
+
+    thresholds = {k: v for k, v in
+                  (('strong_element', args.strong_element),
+                   ('weak_element', args.weak_element)) if v is not None}
+    classified = classify_topics(list(zip(stats['topic_id'], stats['keywords'])),
+                                 category_words, element_scores, **thresholds)
     stats['category'] = [c for _, _, c, _ in classified]
     stats['matched'] = [format_hits(h) for _, _, _, h in classified]
+    stats['tag_score'] = stats['topic_id'].map(element_scores).fillna(0.0)
+    stats['tag_best'] = stats['topic_id'].map(best_tags)
 
     # 3. パネルごとの密度・集中度を測る
     panels, totals = measure_panels(args.reviews, args.games, args.backbone_tier, exclude)
@@ -150,7 +175,7 @@ def main():
     output = args.output or os.path.join(os.path.dirname(args.stats), 'topic_categories.csv')
     columns = ['topic_id', 'category', 'keywords', 'count', 'games', 'top1_share', 'top1_game',
                'per_week_all', 'mean_per_week_all', 'per_week_backbone',
-               'reaches_all', 'reaches_backbone', 'matched']
+               'reaches_all', 'reaches_backbone', 'matched', 'tag_score', 'tag_best']
     stats.sort_values('count', ascending=False)[columns].to_csv(output, index=False)
     print(f"\n✅ 出力: {output}")
 

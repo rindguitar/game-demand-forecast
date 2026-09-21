@@ -1,6 +1,6 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
-        extract-topics compare-granularity cooccurrence validate-tags test-topic \
+        extract-topics compare-granularity cooccurrence validate-tags element-vocabulary test-topic \
         collect-10k collect-20k learning-curve analyze-curve
 
 help:
@@ -38,6 +38,7 @@ help:
 	@echo "  make compare-granularity - トピックの粒度レベルを比較（再学習なし）"
 	@echo "  make cooccurrence       - ゲームごとのレシピと部品ペアの共起"
 	@echo "  make validate-tags      - 供給側タグが代用になるかの検証"
+	@echo "  make element-vocabulary - ①ゲーム要素の語彙をタグから作り直す"
 	@echo "  make learning-curve     - Learning Curve実験（10k vs 20k）"
 	@echo "  make analyze-curve      - Learning Curve結果分析・可視化"
 	@echo "  make train-sentiment      - vanillaベースライン学習（⚠️best_model_pre_dapt上書き）"
@@ -161,6 +162,10 @@ cooccurrence:
 
 # 供給側タグがロスター拡大の代用になるかの検証（Issue #42）
 # 検証1は標本が要るので、リフト下限を緩めたレシピを渡す
+# ①ゲーム要素の語彙を母集団のタグから作り直す（Issue #45）
+element-vocabulary:
+	docker compose exec dev python scripts/nlp/update_element_vocabulary.py $(ELEMENT_VOCAB_ARGS)
+
 validate-tags:
 	docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \
 		--min-lift 1.0 --min-count 20 --outdir data/timeseries/cooccurrence_full \

@@ -22,13 +22,13 @@ MIN_HISTORY = '2025-09-01'    # これ以降の発売は履歴が短すぎるの
 
 def game(name, genres, tags, release, total=50000):
     return {'app_id': abs(hash(name)) % 10**6, 'name': name, 'genres': frozenset(genres),
-            'tags': set(tags), 'release_date': release, 'total_reviews': total,
+            'tags': list(tags), 'release_date': release, 'total_reviews': total,
             'total_positive': 0, 'total_negative': 0}
 
 
 def args(**kw):
     base = dict(seed=42, n_games=6, genre_floor=3, max_backbone=14,
-                max_per_genre=12, tag_overlap_threshold=2)
+                max_per_genre=12, tag_overlap_threshold=2, overlap_tags=6)
     base.update(kw)
     return Namespace(**base)
 
@@ -208,7 +208,7 @@ def test_game_master_roundtrip_keeps_numbers_numeric(tmp_path):
     assert loaded['total_reviews'] == 12345
     assert isinstance(loaded['app_id'], int)
     assert loaded['genres'] == {'Action'}
-    assert loaded['tags'] == {'x'}
+    assert loaded['tags'] == ['x']   # 順位を保つのでリスト
     assert loaded['tier'] == '土台'
 
 
@@ -220,3 +220,61 @@ def test_game_master_roundtrip_tolerates_blank_counts(tmp_path):
         'app_id,name,genres,tags,total_reviews,total_positive,total_negative,'
         'release_date,tier\n1,A,Action,x,,,,2020-01-01,土台\n')
     assert load_game_master(path)[0]['total_reviews'] == 0
+
+
+def test_top_tag_set_takes_the_highest_ranked():
+    """似ている判定は上位n個だけを見る（下位の汎用タグに埋もれないため）"""
+    from collect_timeseries_dataset import top_tag_set
+    g = {'tags': ['Racing', 'Automobile Sim', 'Open World', 'Action', 'Adventure']}
+    assert top_tag_set(g, 2) == {'Racing', 'Automobile Sim'}
+    assert len(top_tag_set(g, 99)) == 5
+    assert top_tag_set({}, 3) == set()
+
+
+def test_overlap_judgment_uses_only_the_top_tags():
+    """保存数を増やしても、判定に使う数を絞れば似ていないと判定できる
+
+    実測: 上位20個まで見ると Action / Adventure などの汎用タグで
+    無関係なゲーム同士が「似ている」と出る。
+    """
+    racing = game('racing', ['Racing'], [], '2020-01-01')
+    social = game('social', ['Casual'], [], '2020-02-01')
+    racing['tags'] = ['Racing', 'Automobile Sim', 'Action', 'Adventure', 'Open World']
+    social['tags'] = ['Social', 'VR', 'Action', 'Adventure', 'Open World']
+
+    chosen, _ = select_from_pool([racing, social], WINDOW_START, MIN_HISTORY,
+                                 args(n_games=2, genre_floor=0, overlap_tags=2))
+    assert len(chosen) == 2, '上位2個なら別物と判定されるはず'
+
+    chosen, _ = select_from_pool([racing, social], WINDOW_START, MIN_HISTORY,
+                                 args(n_games=2, genre_floor=0, overlap_tags=5))
+    assert len(chosen) == 1, '5個まで見ると汎用タグで似ていると誤判定される'
+
+
+def test_game_master_roundtrip_keeps_tag_order(tmp_path):
+    """台帳はタグの順位を保つ（並べ替えると「上位n個」が意味を失う）"""
+    from collect_timeseries_dataset import load_game_master, save_game_master
+    path = str(tmp_path / 'games.csv')
+    original = dict(game('A', ['Action'], [], '2020-01-01'), tier='土台')
+    original['tags'] = ['Souls-like', 'Difficult', 'Action', 'Adventure']
+    save_game_master(path, [original])
+    assert load_game_master(path)[0]['tags'] == ['Souls-like', 'Difficult', 'Action', 'Adventure']
+
+
+def test_refresh_ledger_tags_replaces_tags_but_not_the_roster(tmp_path):
+    """タグだけ入れ替える。ゲームの顔ぶれは変えない"""
+    from collect_timeseries_dataset import (load_game_master, refresh_ledger_tags,
+                                            save_game_master)
+    path = str(tmp_path / 'games.csv')
+    a = dict(game('A', ['Action'], [], '2020-01-01'), tier='土台')
+    a['tags'] = ['Old']
+    b = dict(game('B', ['Action'], [], '2020-02-01'), tier='土台')
+    b['tags'] = ['Keep']
+    save_game_master(path, [a, b])
+
+    pool = [dict(a, tags=['New', 'Extra', 'More'])]   # Aだけ新しいタグを持つ
+    assert refresh_ledger_tags(path, pool) == 1
+    loaded = {g['name']: g['tags'] for g in load_game_master(path)}
+    assert loaded['A'] == ['New', 'Extra', 'More']
+    assert loaded['B'] == ['Keep'], '母集団に無いゲームは触らない'
+    assert set(loaded) == {'A', 'B'}, '顔ぶれは変わらない'

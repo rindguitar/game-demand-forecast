@@ -209,7 +209,7 @@ def save_game_master(path: str, games: list) -> None:
         for g in games:
             writer.writerow(dict(g,
                                  genres='|'.join(sorted(g['genres'])),
-                                 tags='|'.join(sorted(g['tags']))))
+                                 tags='|'.join(g['tags'])))
 
 
 # 台帳のうち数値として読み戻す列（CSVは全部文字列で返るため）
@@ -228,7 +228,7 @@ def load_game_master(path: str) -> list:
         for field in GAME_INT_FIELDS:
             r[field] = int(r[field]) if str(r.get(field, '')).strip() else 0
         r['genres'] = set(filter(None, r.get('genres', '').split('|')))
-        r['tags'] = set(filter(None, r.get('tags', '').split('|')))
+        r['tags'] = [t for t in r.get('tags', '').split('|') if t]
     return rows
 
 
@@ -255,6 +255,13 @@ def build_pool(args) -> list:
     APIを叩かないので、条件を変えた選び直しは数秒で終わる。
     """
     cache = load_pool_cache(args.pool_cache)
+    if getattr(args, 'refresh_tags', False):
+        # 保存数を変えたときなど、タグだけ取り直す。他の項目は再取得しない
+        dropped = 0
+        for key, rec in cache.items():
+            if key != '__order__' and isinstance(rec, dict) and rec.pop('tags', None) is not None:
+                dropped += 1
+        print(f'  タグを取り直します（{dropped}本ぶんを破棄・保存{args.n_tags}個）')
     if args.refresh_pool or '__order__' not in cache:
         listing = get_popular_games(n_pages=args.pages)
         cache['__order__'] = [[app_id, name] for app_id, name in listing]
@@ -304,7 +311,8 @@ def build_pool(args) -> list:
             'app_id': app_id,
             'name': rec['name'],
             'genres': genres,
-            'tags': set(rec.get('tags') or ()) - TAG_NOISE,
+            # 投票順のまま保つ。上位ほど「そのゲームが何であるか」を表す
+            'tags': [t for t in (rec.get('tags') or ()) if t not in TAG_NOISE],
             'release_date': rec['release_date'],
             'total_reviews': rec['total_reviews'],
             'total_positive': rec.get('total_positive', 0),
@@ -315,6 +323,37 @@ def build_pool(args) -> list:
     print(f'  候補 {len(pool)}本（母集団{len(listing)}本 / 新規取得{fetched}件'
           f'{" / 失敗" + str(failed) + "本" if failed else ""}）')
     return pool
+
+
+def refresh_ledger_tags(path: str, pool: list) -> int:
+    """母集団の最新のタグを既存台帳に反映する（ロスターの顔ぶれは変えない）
+
+    台帳のタグは選定のたびに書かれるので、保存数を変えても自動では更新されない。
+    顔ぶれを固定したままタグだけ入れ替えたいときに使う。
+    """
+    if not os.path.exists(path):
+        return 0
+    games = load_game_master(path)
+    latest = {g['app_id']: list(g.get('tags') or []) for g in pool}
+    changed = 0
+    for g in games:
+        tags = latest.get(g['app_id'])
+        if tags and tags != list(g['tags']):
+            g['tags'] = tags
+            changed += 1
+    save_game_master(path, games)
+    return changed
+
+
+def top_tag_set(game: dict, n: int) -> set:
+    """タグの上位n個を集合で返す（似ているかの判定用）
+
+    タグは投票順に並んでいる。下位には Action / Adventure / Open World のような
+    どのゲームにも付く語が来るので、全部を見ると無関係なゲーム同士が似ていると出る
+    （実測: 上位20個で判定すると8本の全28ペアが弾かれた）。
+    語彙として使うときは全部使い、似ている判定にだけ上位を使う。
+    """
+    return set(list(game.get('tags') or [])[:n])
 
 
 def select_from_pool(pool: list, window_start: str, min_history: str, args,
@@ -359,8 +398,9 @@ def select_from_pool(pool: list, window_start: str, min_history: str, args,
             return False
         if any(genre_counts.get(x, 0) >= args.max_per_genre for x in game['genres']):
             return False
-        return not any(len(game['tags'] & g['tags']) >= args.tag_overlap_threshold
-                       for g in selected)
+        mine = top_tag_set(game, args.overlap_tags)
+        return not any(len(mine & top_tag_set(g, args.overlap_tags))
+                       >= args.tag_overlap_threshold for g in selected)
 
     def take(game):
         selected.append(game)
@@ -434,7 +474,12 @@ def main():
                         help='既存の台帳を捨ててゲームを選び直す')
     parser.add_argument('--dry-run', action='store_true',
                         help='選定だけ行い、収集はしない（条件を変えて顔ぶれを確認する用）')
-    parser.add_argument('--n-tags', type=int, default=6, help='タグ重なり判定で見る上位タグ数')
+    parser.add_argument('--n-tags', type=int, default=20,
+                        help='保存するタグ数。ストアページの上限が20個')
+    parser.add_argument('--overlap-tags', type=int, default=6,
+                        help='似ているかの判定に使う上位タグ数（保存数とは別）')
+    parser.add_argument('--refresh-tags', action='store_true',
+                        help='母集団のタグを取り直し、既存台帳のタグも入れ替える（顔ぶれは変えない）')
     parser.add_argument('--tag-overlap-threshold', type=int, default=2,
                         help='この数以上タグが共通したら「似たゲーム」として弾く')
     parser.add_argument('--max-reviews-per-game', type=int, default=400000,
@@ -480,6 +525,14 @@ def main():
     window_start = since_date.isoformat()
     min_history = (today - dt.timedelta(days=int(365 * args.min_history_years))).isoformat()
     recent_from = (today - dt.timedelta(days=int(365 * args.recent_years))).isoformat()
+
+    if args.refresh_tags:
+        print(f'\n[タグ再取得] 保存数 {args.n_tags}個')
+        pool = build_pool(args)
+        changed = refresh_ledger_tags(args.games_output, pool)
+        print(f'  母集団 {len(pool)}本 / 台帳のタグを更新: {changed}本')
+        print('\n--refresh-tags のため収集は行わない')
+        return
 
     existing = (load_game_master(args.games_output)
                 if os.path.exists(args.games_output) and not args.reselect else [])
