@@ -16,16 +16,18 @@
 
 import argparse
 import json
+import os
 import re
+import sys
 
-# ゲームの中身を表さないタグ。開発規模・販売形態・課金モデルは①ではない
-# （Free to Play は③ビジネス条件なので、そちらの語彙で拾う）
-NOT_ELEMENTS = {'Indie', 'Early Access', 'Free to Play', 'Free To Play'}
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+
+from src.nlp.tag_semantics import NOT_ELEMENT_TAGS, element_tags  # noqa: E402
 
 SECTION = 'element'
 HEADER = """# ①ゲーム要素の語彙（自動生成・手で編集しない）
 # scripts/nlp/update_element_vocabulary.py が母集団のSteamタグから作る。
-# 除いているのは開発規模・販売形態・課金モデルのタグだけ（→ NOT_ELEMENTS）。"""
+# 除いているのは開発規模・販売形態・課金モデルのタグだけ（→ tag_semantics.NOT_ELEMENT_TAGS）。"""
 
 
 def parse_args():
@@ -38,11 +40,14 @@ def parse_args():
 
 
 def collect_tags(pool_path: str) -> list:
-    """母集団のタグを集める（中身を表さないものは除く）"""
+    """母集団のタグを集める（中身を表さないものは除く）
+
+    除外の定義は src/nlp/tag_semantics.py に置く。意味の照合側と同じ語彙でないと、
+    生成側だけ除いても照合側で①に入ってしまう（実測: `free` が Free to Play に0.66）。
+    """
     with open(pool_path, encoding='utf-8') as f:
         pool = {k: v for k, v in json.load(f).items() if k != '__order__'}
-    tags = {t for v in pool.values() if isinstance(v, dict) for t in (v.get('tags') or [])}
-    return sorted(t for t in tags if t not in NOT_ELEMENTS)
+    return element_tags(pool)
 
 
 def replace_section(text: str, tags: list) -> str:
@@ -63,7 +68,7 @@ def main():
     updated = replace_section(text, tags)
 
     print(f'①ゲーム要素の語彙: {len(tags)}語（{args.pool} のタグから）')
-    print(f'  除いたもの: {", ".join(sorted(NOT_ELEMENTS))}')
+    print(f'  除いたもの: {", ".join(sorted(NOT_ELEMENT_TAGS))}')
     print(f'  例: {", ".join(tags[:12])}')
     if args.dry_run:
         print('\n--dry-run のため書き換えない')

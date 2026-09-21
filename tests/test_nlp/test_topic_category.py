@@ -175,3 +175,38 @@ def test_propernoun_still_wins_over_element(words):
     words = dict(words, element=['metroidvania'])
     category, _ = classify_topic('metroidvania, team cherry', words)
     assert category == PROPERNOUN
+
+
+def test_strong_tag_score_beats_word_counting(words):
+    """タグとの近さが強ければ、語の数の多数決を飛び越えて①になる
+
+    実例: `sandbox, sandbox game, best sandbox` は `best game` の1票で
+    中身なしに落ちていた。タグ Sandbox との近さ 0.78 を強い証拠として扱う。
+    """
+    category, _ = classify_topic('sandbox, sandbox game, best game', words,
+                                 element_score=0.78)
+    assert category == ELEMENT
+
+
+def test_weak_tag_score_only_adds_one_vote(words):
+    """弱い近さは1票にしかならない（他に証拠があれば負ける）"""
+    # 中身なしが2語当たれば、①の1票では勝てない
+    category, _ = classify_topic('best game, hours, something', words, element_score=0.52)
+    assert category == CONTENTLESS
+    # 拮抗すれば手動送り
+    category, _ = classify_topic('best game, something', words, element_score=0.52)
+    assert category == AMBIGUOUS
+
+
+def test_tag_score_below_threshold_is_ignored(words):
+    """当てにならない帯の近さは証拠として数えない"""
+    category, _ = classify_topic('nothing matches', words, element_score=0.40)
+    assert category == UNCLASSIFIED
+
+
+def test_thresholds_are_configurable(words):
+    """閾値は呼び出し側で変えられる（実測で決めるため）"""
+    assert classify_topic('nothing', words, element_score=0.55,
+                          strong_element=0.50, weak_element=0.45)[0] == ELEMENT
+    assert classify_topic('nothing', words, element_score=0.55,
+                          strong_element=0.90, weak_element=0.80)[0] == UNCLASSIFIED
