@@ -2,6 +2,11 @@
 トピックの分類モジュール
 
 抽出したトピックを ①ゲーム要素 ②品質・運営 ③ビジネス条件 ＋ 中身なし に仕分ける。
+
+①ゲーム要素は**証拠のある分類**にする。かつては「どの語彙にも当たらなければ①」という
+残余だったため、語彙の穴がすべて需要スコアの対象に落ちていた（実測: 64本で boobs /
+braindead / money / ruined life が①に混ざった）。①にも語彙を持たせ、
+どこにも当たらないものは「未分類」に落とす。
 需要スコアは①だけを合算し、③は阻害要因として別枠に持つ（docs/decisions.md 2026-08-18）。
 
 仕分けは「ルール → 曖昧なものだけ手動 → その結果を教師データに分類器」の3段構えで、
@@ -19,6 +24,7 @@ BUSINESS = 'business'
 CONTENTLESS = 'contentless'
 PROPERNOUN = 'propernoun'
 AMBIGUOUS = 'ambiguous'
+UNCLASSIFIED = 'unclassified'
 
 # 表示用の日本語名
 CATEGORY_LABELS = {
@@ -28,10 +34,11 @@ CATEGORY_LABELS = {
     CONTENTLESS: '中身なし',
     PROPERNOUN: '固有名詞',
     AMBIGUOUS: '要手動判定',
+    UNCLASSIFIED: '未分類',
 }
 
 # 設定ファイルに書ける見出し（[quality] など）
-_SECTIONS = (QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN)
+_SECTIONS = (ELEMENT, QUALITY, BUSINESS, CONTENTLESS, PROPERNOUN)
 
 
 def load_category_words(path: str) -> Dict[str, List[str]]:
@@ -79,7 +86,7 @@ def classify_topic(keywords: str,
     トピックのキーワードから分類を1つ決める
 
     1. 分類ごとに、当たった語を数える
-    2. 1つも当たらなければ ①ゲーム要素（語彙は「要素以外」を集めたものなので）
+    2. 1つも当たらなければ **未分類**（①ではない。証拠が無いものを需要スコアに入れない）
     3. 固有名詞に当たっていればそれで確定（束ねる対象から確実に外すため）
     4. 最多の分類が1つに決まればそれ。同数で並んだら AMBIGUOUS（手動送り）
 
@@ -89,7 +96,7 @@ def classify_topic(keywords: str,
     hits = {c: _matched_words(keywords, ws) for c, ws in category_words.items()}
     counts = {c: len(v) for c, v in hits.items() if v}
     if not counts:
-        return ELEMENT, hits
+        return UNCLASSIFIED, hits
 
     # 固有名詞は当たった時点で確定させる。束ねてはいけないものなので、
     # 他の分類と同数で並んで ambiguous に落ちると取りこぼす

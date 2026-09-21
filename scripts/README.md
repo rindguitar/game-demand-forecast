@@ -132,6 +132,9 @@ flowchart LR
 
 `extract_topics.py` は「どんな話題があるか」を出すところまで。
 `categorize_topics.py` がそれを ①ゲーム要素 / ②品質・運営 / ③ビジネス条件 / 中身なし に仕分けます。
+**①は語彙に当たって初めて①になります**（残余ではありません）。どこにも当たらないものは
+**未分類**に落ちて需要スコアの対象から外れます。①の語彙は `update_element_vocabulary.py` が
+母集団のSteamタグから自動生成するので、手で書き足す必要はありません。
 需要スコアに合算するのは①だけで、③は阻害要因として別枠に持ちます（`docs/decisions.md` 2026-08-18）。
 
 `bundle_topics.py` は、週10件に届かない小さいトピックだけをSteamタグの語彙に寄せます。
@@ -206,6 +209,7 @@ flowchart LR
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
 | `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す（Issue #42） |
 | `validate_tag_supply.py` | 供給側のタグがロスター拡大の代用になるか検証する（Issue #42） |
+| `update_element_vocabulary.py` | ①ゲーム要素の語彙を母集団のSteamタグから作り直す（Issue #45） |
 
 **使用方法:**
 ```bash
