@@ -24,10 +24,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.nlp.topic_bundle import OTHER, bundle_topics, load_tag_vocabulary  # noqa: E402
-from src.nlp.topic_category import CATEGORY_LABELS, ELEMENT, QUALITY, BUSINESS  # noqa: E402
-
-# 束ねる対象にする分類（中身なし・固有名詞・要手動判定は束ねない）
-BUNDLED_CATEGORIES = [ELEMENT, QUALITY, BUSINESS]
+from src.nlp.topic_category import CATEGORY_LABELS, MEANINGFUL_CATEGORIES  # noqa: E402
 
 
 def parse_args():
@@ -60,8 +57,8 @@ def main():
     # 2. 束ねる対象を絞る
     single = topics[topics['reaches_all']].copy()          # 大きいので単独で残す
     small = topics[~topics['reaches_all']].copy()
-    target = small[small['category'].isin(BUNDLED_CATEGORIES)].copy()
-    dropped = small[~small['category'].isin(BUNDLED_CATEGORIES)]
+    target = small[small['category'].isin(MEANINGFUL_CATEGORIES)].copy()
+    dropped = small[~small['category'].isin(MEANINGFUL_CATEGORIES)]
     print(f"  単独で残す（週{args.min_per_week:g}件以上）: {len(single)}個 / "
           f"{single['count'].sum():,}件")
     print(f"  束ねる対象                        : {len(target)}個 / {target['count'].sum():,}件")

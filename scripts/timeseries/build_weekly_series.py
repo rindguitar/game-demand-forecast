@@ -23,15 +23,12 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from src.nlp.topic_category import BUSINESS, ELEMENT, QUALITY  # noqa: E402
+from src.nlp.topic_category import MEANINGFUL_CATEGORIES  # noqa: E402
 from src.timeseries.weekly import (  # noqa: E402
     add_week_column,
     build_weekly_series,
     trim_partial_weeks,
 )
-
-# 時系列に乗せる分類（中身なし・固有名詞・要手動判定は乗せない）
-SERIES_CATEGORIES = [ELEMENT, QUALITY, BUSINESS]
 
 
 def parse_args():
@@ -86,9 +83,9 @@ def main():
     args = parse_args()
     exclude = args.exclude_game if args.exclude_game is not None else ['Starfield']
 
-    # 1. 乗せる単位を選ぶ
+    # 1. 乗せる単位を選ぶ（①②③以外は乗せない）
     categories = pd.read_csv(args.categories_csv).set_index('topic_id')
-    on_series = categories[categories['category'].isin(SERIES_CATEGORIES)]
+    on_series = categories[categories['category'].isin(MEANINGFUL_CATEGORIES)]
     games = pd.read_csv(args.games)
     backbone = [g for g in games.loc[games['tier'] == args.backbone_tier, 'name']
                 if g not in exclude]

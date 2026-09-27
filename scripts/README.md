@@ -142,11 +142,16 @@ flowchart LR
 `--weak-element`（既定0.50・これ以上で1票）で変えられます。
 需要スコアに合算するのは①だけで、③は阻害要因として別枠に持ちます（`docs/decisions.md` 2026-08-18）。
 
+近さを測って仕分けるまでは `classify_with_evidence()`（`src/nlp/topic_category.py`）1つに閉じていて、
+`compare_topic_granularity.py` と `build_topic_cooccurrence.py` も同じ入口を通ります。
+**証拠は省略できません**。省略できると、文字の一致だけの古い規則に黙って戻るためです（`docs/decisions.md` 2026-09-27）。
+
 `bundle_topics.py` は、週10件に届かない小さいトピックだけをSteamタグの語彙に寄せます。
 大きいトピックはそのまま残し、タグに寄らないものは「その他」に集約します（`docs/decisions.md` 2026-08-31）。
 
 `categorize_topics.py` と `bundle_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます
 （前者は土台パネルの顔ぶれを `tier` 列から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
+`categorize_topics.py` はさらに `data/timeseries/pool_cache.json`（①の語彙にするSteamタグ）も読みます。
 
 **粒度を粗くして比べる**（抽出済みのモデルだけで動く・再学習しない）
 
@@ -162,6 +167,9 @@ flowchart LR
 `compare_topic_granularity.py` は455トピックをマージ木にまとめ、200個 / 100個 ... と切りながら
 どのレベルでも同じ物差しで測って並べます。トピックの目標粒度を決めるための材料で
 （Issue #37）、日々のパイプラインには入りません。物差しの中身は `--help` を参照。
+
+上図のほかに `pool_cache.json` も読みます（各レベルの単位を `classify_with_evidence()` で仕分けるため）。
+複数のレベルを仕分けるので、埋め込みモデルは1回だけ読んで使い回します。
 
 細かい側（トピックを増やす方向）はこの方法では作れません。`extract_topics.py` を
 `--min-topic-size` を下げて回し直す必要があります。
@@ -181,6 +189,9 @@ flowchart LR
 同じレシピに入った部品のペアを数えます（Issue #42）。**出現では測りません** ——
 素朴に「同じゲームに出るか」で数えると、時系列に乗る35単位のうち21個が全24本に出るため
 ほぼ全結合になり情報にならないからです。
+
+上図のほかに `pool_cache.json` も読みます（単位を `classify_with_evidence()` で仕分けるため）。
+**レシピに残すのは①②③だけ**で、中身なし・固有名詞・未分類・要手動判定は外します（`--keep-noise` で外さない）。
 
 ⚠️ **24本では「このペアが無い = 未開拓」は言えません**（ペアは44,850通り）。
 読めるのはレシピと、観測された共起までです。

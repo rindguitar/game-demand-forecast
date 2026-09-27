@@ -13,9 +13,11 @@ braindead / money / ruined life が①に混ざった）。①にも語彙を持
 このモジュールが担うのは第一段のルール。
 """
 
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 import os
 import re
+
+from src.nlp.tag_semantics import match_terms
 
 # 分類の識別子（CSVにもこの値が入る）
 ELEMENT = 'element'
@@ -25,6 +27,9 @@ CONTENTLESS = 'contentless'
 PROPERNOUN = 'propernoun'
 AMBIGUOUS = 'ambiguous'
 UNCLASSIFIED = 'unclassified'
+
+# 中身のある3分類（束ねる・時系列に乗せる対象を選ぶときに使う共通の定義）
+MEANINGFUL_CATEGORIES = (ELEMENT, QUALITY, BUSINESS)
 
 # ①の証拠としてタグとの近さを使うときの閾値（実測で決める。→ docs/decisions.md）
 # 0.5前後は当てにならない帯なので、強い証拠と弱い証拠を分けて扱う
@@ -87,7 +92,7 @@ def _matched_words(keywords: str, vocabulary: List[str]) -> List[str]:
 
 def classify_topic(keywords: str,
                    category_words: Dict[str, List[str]],
-                   element_score: float = 0.0,
+                   element_score: float,
                    strong_element: float = STRONG_ELEMENT,
                    weak_element: float = WEAK_ELEMENT
                    ) -> Tuple[str, Dict[str, List[str]]]:
@@ -106,7 +111,8 @@ def classify_topic(keywords: str,
     タグ `Sandbox` との近さ 0.78 を強い証拠として扱えば、正しく①になる。
 
     Args:
-        element_score: ①の語彙（Steamタグ）といちばん近い語との近さ（0〜1）
+        element_score: ①の語彙（Steamタグ）といちばん近い語との近さ（0〜1）。
+            省略不可（既定値0.0を持たせると、証拠を測らずに呼んでも黙って通ってしまう）
         strong_element: これ以上なら①で確定する
         weak_element: これ以上なら①に1票入れる（多数決に参加する）
 
@@ -136,7 +142,7 @@ def classify_topic(keywords: str,
 
 def classify_topics(topics: List[Tuple[int, str]],
                     category_words: Dict[str, List[str]],
-                    element_scores: Optional[Dict[int, float]] = None,
+                    element_scores: Dict[int, float],
                     **thresholds
                     ) -> List[Tuple[int, str, str, Dict[str, List[str]]]]:
     """
@@ -145,19 +151,66 @@ def classify_topics(topics: List[Tuple[int, str]],
     Args:
         topics: (topic_id, keywords) の並び。Outlier（topic_id = -1）は呼び出し側で除く
         category_words: load_category_words() の戻り値
-        element_scores: topic_id → ①の語彙との近さ。省略すると語の一致だけで決める
+        element_scores: topic_id → ①の語彙との近さ。無い topic_id があれば KeyError（0点扱いにしない）
 
     Returns:
         (topic_id, keywords, 分類, 当たった語) の並び
     """
-    scores = element_scores or {}
     result = []
     for topic_id, keywords in topics:
+        if topic_id not in element_scores:
+            raise KeyError(f'topic_id={topic_id} の①の近さがありません'
+                           '（0点扱いにすると黙って古い規則に戻るため止める）')
         category, hits = classify_topic(keywords, category_words,
-                                        element_score=scores.get(topic_id, 0.0),
+                                        element_score=element_scores[topic_id],
                                         **thresholds)
         result.append((topic_id, keywords, category, hits))
     return result
+
+
+class ClassifiedTopic(NamedTuple):
+    """classify_with_evidence() が返す、1トピックぶんの分類結果"""
+    topic_id: int
+    keywords: str
+    category: str
+    hits: Dict[str, List[str]]
+    tag: str
+    tag_score: float
+
+
+def classify_with_evidence(topics: List[Tuple[int, str]],
+                           category_words: Dict[str, List[str]],
+                           element_vocabulary: Sequence[str],
+                           encoder=None,
+                           **thresholds
+                           ) -> List[ClassifiedTopic]:
+    """
+    ①の証拠（タグとの意味の近さ）を測ってから分類する。スクリプトは必ずここを通す
+
+    1. 各トピックのキーワードと①の語彙（Steamタグ）との近さを測る
+    2. その近さを証拠として classify_topics に渡す
+
+    Args:
+        element_vocabulary: ①の語彙にするタグの一覧。空なら ValueError
+            （全トピックが0点になり、黙って文字の一致だけの規則に戻るため）
+        encoder: 埋め込みモデル。重いので呼び出し側で1回だけ読んで使い回す（tag_semantics.load_encoder）
+
+    Returns:
+        ClassifiedTopic の並び
+    """
+    if not len(element_vocabulary):
+        raise ValueError('①の語彙が空です（全トピックが0点になり、黙って古い規則に戻るため止める）')
+
+    keywords_list = [keywords for _, keywords in topics]
+    matched = match_terms(keywords_list, list(element_vocabulary), encoder=encoder)
+    element_scores, best_tags = {}, {}
+    for (topic_id, _), (tag, score) in zip(topics, matched):
+        element_scores[topic_id], best_tags[topic_id] = score, tag
+
+    classified = classify_topics(topics, category_words, element_scores, **thresholds)
+    return [ClassifiedTopic(topic_id, keywords, category, hits,
+                            best_tags[topic_id], element_scores[topic_id])
+            for topic_id, keywords, category, hits in classified]
 
 
 def format_hits(hits: Dict[str, List[str]], limit: Optional[int] = 3) -> str:

@@ -18,8 +18,10 @@ src/
 
 ## モジュールの繋がり
 
-**`src/` の中では、モジュール同士がひとつもimportし合っていません。**
+**`src/` の中では、モジュール同士は基本的にimportし合いません。**
 `src/` は独立した部品を並べた「部品箱」で、それを組み立てて処理にするのは `scripts/` 側の役割です。
+例外は `nlp/topic_category.py → nlp/tag_semantics.py` の1本だけです（動かない `sentiment_plots.py` を除く）。
+仕分けの入口が①の証拠を必ず測るように、あえて繋いでいます（`docs/decisions.md` 2026-09-27）。
 
 そのため図は「どのスクリプトが、どの部品を使うか」だけになります。用途ごとに分けて描きます。
 
@@ -50,15 +52,35 @@ flowchart LR
     AN --> DS2["nlp/dataset.py"]
     ET["scripts/nlp/extract_topics.py"] --> TP["nlp/topic.py"]
     VA2["scripts/evaluation/<br/>validate_sentiment_english.py"] --> SN["nlp/sentiment.py"]
-    CO["scripts/nlp/<br/>build_topic_cooccurrence.py"] --> TQ["nlp/topic_cooccurrence.py<br/>レシピと共起"]
-    CG["scripts/nlp/<br/>compare_topic_granularity.py"] --> TG["nlp/topic_granularity.py<br/>粒度を粗くする"]
-    CG --> TC2["nlp/topic_category.py<br/>トピックの仕分け"]
-    CG --> WK["timeseries/weekly.py<br/>密度の物差し"]
 ```
 
-図に描いていない線が1本あります。`build_topic_cooccurrence.py` は
-`nlp/topic_cooccurrence.py` のほかに、**`nlp/topic_granularity.py`**（レベル300で単位を作る）と
-**`nlp/topic_category.py`**（中身なし・固有名詞をレシピから外す）も使います。
+**抽出したトピックを仕分けて測るときの部品**
+
+```mermaid
+flowchart LR
+    CT["scripts/nlp/<br/>categorize_topics.py"] --> WK["timeseries/weekly.py<br/>密度の物差し"]
+    CG["scripts/nlp/<br/>compare_topic_granularity.py"] --> TG["nlp/topic_granularity.py<br/>粒度を粗くする"]
+    CO["scripts/nlp/<br/>build_topic_cooccurrence.py"] --> TQ["nlp/topic_cooccurrence.py<br/>レシピと共起"]
+    CT --> CLS
+    CG --> CLS
+    CO --> CLS
+    %% 見えない線（~~~）は、箱を右端の列に置いて交差を消すためのもの
+    WK ~~~ CLS
+    TQ ~~~ CLS
+    TG ~~~ CLS
+    subgraph CLS["証拠つきの仕分け"]
+        direction TB
+        PT["data/pool_tags.py<br/>タグを読む"]
+        TC["nlp/topic_category.py<br/>仕分けの入口"] --> TS["nlp/tag_semantics.py<br/>意味の近さ"]
+    end
+```
+
+3本のスクリプトは、箱の中の3つを同じ順で使います（`pool_tags` でタグを読む →
+`tag_semantics.element_tags` で①の語彙にする → `topic_category.classify_with_evidence` で仕分ける）。
+仕分けの入口が1つなので、①の証拠（タグとの意味の近さ）を付け忘れることがありません。
+
+図に描いていない線が2本あります。`compare_topic_granularity.py` は **`timeseries/weekly.py`** も、
+`build_topic_cooccurrence.py` は **`nlp/topic_granularity.py`**（レベル300で単位を作る）も使います。
 線を描くと交差するので本文に出しました。
 
 この構造の意味は次の通りです。
@@ -132,15 +154,24 @@ flowchart LR
 
 **主要関数（topic_category.py）:**
 - `load_category_words(path)` — 分類語彙を読む（`configs/topic_categories.txt`）
-- `classify_topic(keywords, words)` — トピック1件を仕分ける。どの語彙にも当たらなければ
-  **未分類**、複数の分類が同数で当たったら `ambiguous`（手動送り）。
-  固有名詞は同数でも優先する（束ねる対象から確実に外すため）
-  - `element_score` にタグとの近さ（0〜1）を渡せる。**強い証拠（0.65以上）は多数決の外で確定**
-    させる。意味の近さと語の数は単位が違うので、1票として混ぜると `sandbox`（0.78）が
+- `classify_topic(keywords, words, element_score)` — トピック1件を仕分ける。どの語彙にも
+  当たらず `element_score` も弱ければ **未分類**、複数の分類が同数で当たったら `ambiguous`
+  （手動送り）。固有名詞は同数でも優先する（束ねる対象から確実に外すため）。
+  `element_score` は**省略不可**（既定値を持たせると、証拠を測らずに呼んでも黙って通る）
+  - `element_score` はタグとの近さ（0〜1）。**強い証拠（0.65以上）は多数決の外で確定**させる。
+    意味の近さと語の数は単位が違うので、1票として混ぜると `sandbox`（0.78）が
     `game best`（1票）と並んでしまう
   - **①ゲーム要素は証拠のある分類**。かつては残余（どこにも当たらなければ①）だったため、
     語彙の穴がそのまま需要スコアに混入していた（実測: 64本で `boobs` `braindead` `money`
     `ruined life` が①に入った）。→ `docs/decisions.md` 2026-09-21
+- `classify_topics(topics, words, element_scores)` — 一覧をまとめて仕分ける。`element_scores`
+  に無い `topic_id` があれば `KeyError`（黙って0点にしない）
+- `classify_with_evidence(topics, words, element_vocabulary, encoder=None)` — **スクリプトが使う唯一の入口**。
+  `tag_semantics.match_terms` で①の語彙（Steamタグ）との近さを測ってから `classify_topics` に渡す。
+  `element_vocabulary` が空だと `ValueError`。戻り値は `ClassifiedTopic`
+  （topic_id, keywords, category, hits, tag, tag_score）のNamedTuple
+- `MEANINGFUL_CATEGORIES = (ELEMENT, QUALITY, BUSINESS)` — 中身のある3分類の共通定義。
+  束ねる・時系列に乗せる対象を選ぶ側（`build_weekly_series.py` 等）はここを import する
 
 **主要関数（topic_bundle.py）:**
 - `load_tag_vocabulary(genres, tags)` — 台帳のジャンル列・タグ列から束ね先を作る（長い順）
