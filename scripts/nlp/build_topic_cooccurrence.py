@@ -25,8 +25,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+from src.data.pool_tags import load_pool  # noqa: E402
+from src.nlp.tag_semantics import element_tags  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
-    CONTENTLESS, PROPERNOUN, classify_topic, load_category_words,
+    MEANINGFUL_CATEGORIES, classify_with_evidence, load_category_words,
 )
 from src.nlp.topic_cooccurrence import (  # noqa: E402
     build_cooccurrence, build_game_unit_matrix, compute_lift, extract_recipes,
@@ -42,6 +44,8 @@ def parse_args():
     parser.add_argument('--model', default='models/topic_full')
     parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv')
     parser.add_argument('--categories', default='configs/topic_categories.txt')
+    parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
+                        help='①の語彙にするSteamタグの取得元（必須。証拠なしで分類しないため）')
     parser.add_argument('--outdir', default='data/timeseries/cooccurrence')
     parser.add_argument('--level', type=int, default=300,
                         help='マージ木を切る個数（既定300は Issue #37 の結論）')
@@ -75,13 +79,15 @@ def main():
     print(f"レビュー {len(df):,}件 / ゲーム {df['game_name'].nunique()}本 "
           f"/ 単位 {len(set(mapping.values()))}個（レベル{args.level}・{args.distance}）")
 
-    # 2. 単位を仕分ける（中身なし・固有名詞はレシピから外す）
+    # 2. 単位を仕分ける（①②③以外はレシピから外す）
     category_words = load_category_words(args.categories)
-    categories = {u: classify_topic(k, category_words)[0] for u, k in keywords.items()}
+    tags = element_tags(load_pool(args.pool))
+    classified = classify_with_evidence(list(keywords.items()), category_words, tags)
+    categories = {c.topic_id: c.category for c in classified}
     if not args.keep_noise:
-        noise = {u for u, c in categories.items() if c in (CONTENTLESS, PROPERNOUN)}
+        noise = {u for u, c in categories.items() if c not in MEANINGFUL_CATEGORIES}
         df = df[~df['unit'].isin(noise)]
-        print(f"レシピから外した単位: {len(noise)}個（中身なし・固有名詞）")
+        print(f"レシピから外した単位: {len(noise)}個（中身なし・固有名詞・未分類・要手動判定）")
 
     # 3. ゲーム × 単位 の表からリフトを出し、レシピを作る
     counts = build_game_unit_matrix(df)

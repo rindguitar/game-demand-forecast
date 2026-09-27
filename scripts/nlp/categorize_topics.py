@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.timeseries.weekly import measure_topic_panels  # noqa: E402
 from src.data.pool_tags import load_pool  # noqa: E402
-from src.nlp.tag_semantics import element_tags, match_terms  # noqa: E402
+from src.nlp.tag_semantics import element_tags  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
     CATEGORY_LABELS,
     ELEMENT,
@@ -35,7 +35,7 @@ from src.nlp.topic_category import (  # noqa: E402
     PROPERNOUN,
     AMBIGUOUS,
     UNCLASSIFIED,
-    classify_topics,
+    classify_with_evidence,
     format_hits,
     load_category_words,
 )
@@ -57,7 +57,7 @@ def parse_args():
     parser.add_argument('--categories', default='configs/topic_categories.txt',
                         help='分類語彙のファイル')
     parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
-                        help='①の語彙にするSteamタグの取得元。空文字なら意味の照合をしない')
+                        help='①の語彙にするSteamタグの取得元（必須。証拠なしで分類しないため）')
     parser.add_argument('--strong-element', type=float, default=None,
                         help='タグとの近さがこれ以上なら①で確定（既定は topic_category の値）')
     parser.add_argument('--weak-element', type=float, default=None,
@@ -88,6 +88,7 @@ def measure_panels(reviews_path, games_path, backbone_tier, exclude_games):
 
     panels, totals = measure_topic_panels(df, backbone)
     totals['backbone_games'] = backbone
+    totals['all_games'] = df['game_name'].nunique()
     return panels, totals
 
 
@@ -104,24 +105,19 @@ def main():
     category_words = load_category_words(args.categories)
     loaded = {c: len(w) for c, w in category_words.items()}
     print(f"分類語彙: {loaded}（{args.categories}）")
-    # 2b. ①の証拠として、タグとの意味の近さも測る（文字列照合では拾えない形の証拠）
-    element_scores, best_tags = {}, {}
-    if args.pool:
-        tags = element_tags(load_pool(args.pool))
-        matched = match_terms(list(stats['keywords']), tags)
-        for topic_id, (tag, score) in zip(stats['topic_id'], matched):
-            element_scores[topic_id], best_tags[topic_id] = score, tag
-        print(f'タグとの意味の照合: {len(tags)}語（{args.pool}）')
+    # 2b. ①の語彙（Steamタグ）を読む。近さを測って仕分けるのは classify_with_evidence
+    tags = element_tags(load_pool(args.pool))
+    print(f'タグとの意味の照合: {len(tags)}語（{args.pool}）')
 
     thresholds = {k: v for k, v in
                   (('strong_element', args.strong_element),
                    ('weak_element', args.weak_element)) if v is not None}
-    classified = classify_topics(list(zip(stats['topic_id'], stats['keywords'])),
-                                 category_words, element_scores, **thresholds)
-    stats['category'] = [c for _, _, c, _ in classified]
-    stats['matched'] = [format_hits(h) for _, _, _, h in classified]
-    stats['tag_score'] = stats['topic_id'].map(element_scores).fillna(0.0)
-    stats['tag_best'] = stats['topic_id'].map(best_tags)
+    classified = classify_with_evidence(list(zip(stats['topic_id'], stats['keywords'])),
+                                        category_words, tags, **thresholds)
+    stats['category'] = [c.category for c in classified]
+    stats['matched'] = [format_hits(c.hits) for c in classified]
+    stats['tag_score'] = [c.tag_score for c in classified]
+    stats['tag_best'] = [c.tag for c in classified]
 
     # 3. パネルごとの密度・集中度を測る
     panels, totals = measure_panels(args.reviews, args.games, args.backbone_tier, exclude)
@@ -157,7 +153,8 @@ def main():
     bb_reach = stats[stats['reaches_backbone']]
     bb_element = bb_reach[bb_reach['category'] == ELEMENT]
     print(f"\n需要スコアの対象（①ゲーム要素 × 週{args.min_per_week:g}件以上）")
-    print(f"  全24本パネル : {len(element_reach)}個 / {element_reach['count'].sum():,}件")
+    print(f"  全{totals['all_games']}本パネル : {len(element_reach)}個 / "
+          f"{element_reach['count'].sum():,}件")
     print(f"  土台パネル   : {len(bb_element)}個 / {bb_element['count_backbone'].sum():,}件")
 
     # 5. 指定があれば中身を全部出す

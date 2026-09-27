@@ -27,9 +27,11 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+from src.data.pool_tags import load_pool  # noqa: E402
+from src.nlp.tag_semantics import element_tags, load_encoder  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
-    BUSINESS, CONTENTLESS, ELEMENT, PROPERNOUN, QUALITY,
-    classify_topic, load_category_words,
+    CONTENTLESS, ELEMENT, MEANINGFUL_CATEGORIES, PROPERNOUN,
+    classify_with_evidence, load_category_words,
 )
 from src.nlp.topic_granularity import (  # noqa: E402
     CTFIDF, EMBEDDING, build_linkage, cut_levels, group_dispersion,
@@ -37,8 +39,6 @@ from src.nlp.topic_granularity import (  # noqa: E402
 )
 from src.timeseries.weekly import measure_topic_panels  # noqa: E402
 
-# 企画の単位として数えてよい分類（中身なし・固有名詞・要手動は数えない）
-MEANINGFUL = (ELEMENT, QUALITY, BUSINESS)
 # 束に紛れ込むと需要スコアを水増しする分類
 NOISE = (CONTENTLESS, PROPERNOUN)
 
@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument('--stats', default='data/timeseries/topic_statistics.csv')
     parser.add_argument('--games', default='data/timeseries/games.csv')
     parser.add_argument('--categories', default='configs/topic_categories.txt')
+    parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
+                        help='①の語彙にするSteamタグの取得元（必須。証拠なしで分類しないため）')
     parser.add_argument('--outdir', default='data/timeseries/granularity')
     parser.add_argument('--levels', default='455,300,200,150,100,70,50,35,25,15',
                         help='切り出すトピック数をカンマ区切りで（粗い側のみ）')
@@ -65,22 +67,23 @@ def parse_args():
     return parser.parse_args()
 
 
-def original_categories(stats_path, category_words):
+def original_categories(stats_path, category_words, tags, encoder):
     """元の455トピックの分類。混入率を測るときの基準になる"""
     stats = pd.read_csv(stats_path)
     stats = stats[stats['topic_id'] != -1]
-    return {int(t): classify_topic(k, category_words)[0]
-            for t, k in zip(stats['topic_id'], stats['keywords'])}
+    classified = classify_with_evidence(list(zip(stats['topic_id'], stats['keywords'])),
+                                        category_words, tags, encoder=encoder)
+    return {int(c.topic_id): c.category for c in classified}
 
 
 def measure_level(df, backbone, mapping, model, weights, category_words,
-                  origin_category, args):
+                  origin_category, tags, encoder, args):
     """1つの粒度レベルを測って、単位ごとの表と要約の dict を返す
 
     処理の流れ:
       1. 各レビューの topic_id を束IDに置き換える（Outlier は Outlier のまま）
       2. 束ごとの密度・集中度をパネル共通の物差しで測る
-      3. 束のキーワードを作って分類する
+      3. 束のキーワードを作って分類する（tags・encoder は呼び出し側で1回だけ読んだものを使い回す）
       4. 到達 / 横断 / 意味ありの3条件で有効単位を数え、混入率を出す
     """
     work = df.copy()
@@ -91,7 +94,9 @@ def measure_level(df, backbone, mapping, model, weights, category_words,
 
     units = panels.reset_index().rename(columns={'index': 'unit', 'unit': 'unit'})
     units['keywords'] = units['unit'].map(keywords)
-    units['category'] = [classify_topic(k, category_words)[0] for k in units['keywords']]
+    classified = classify_with_evidence(list(zip(units['unit'], units['keywords'])),
+                                        category_words, tags, encoder=encoder)
+    units['category'] = [c.category for c in classified]
     units['members'] = units['unit'].map(
         pd.Series(list(mapping.values())).value_counts().to_dict())
     units['dispersion'] = units['unit'].map(group_dispersion(model, mapping))
@@ -104,7 +109,7 @@ def measure_level(df, backbone, mapping, model, weights, category_words,
     units['reaches_all'] = units['per_week_all'] >= args.min_per_week
     units['reaches_backbone'] = units['per_week_backbone'] >= args.min_per_week
     units['is_cross'] = units['top1_share'] < args.cross_max
-    units['is_meaningful'] = units['category'].isin(MEANINGFUL)
+    units['is_meaningful'] = units['category'].isin(MEANINGFUL_CATEGORIES)
     units['is_effective'] = units['reaches_all'] & units['is_cross'] & units['is_meaningful']
 
     reach = units[units['reaches_all']]
@@ -145,7 +150,9 @@ def main():
     backbone = [g for g in games.loc[games['tier'] == args.backbone_tier, 'name'].tolist()
                 if g not in exclude]
     category_words = load_category_words(args.categories)
-    origin_category = original_categories(args.stats, category_words)
+    tags = element_tags(load_pool(args.pool))
+    encoder = load_encoder()
+    origin_category = original_categories(args.stats, category_words, tags, encoder)
     weights = df['topic_id'].value_counts().to_dict()
     print(f"レビュー {len(df):,}件 / 土台 {len(backbone)}本 / 距離 {args.distance}")
 
@@ -159,7 +166,7 @@ def main():
     rows = []
     for level in levels:
         units, summary = measure_level(df, backbone, mappings[level], model, weights,
-                                       category_words, origin_category, args)
+                                       category_words, origin_category, tags, encoder, args)
         summary['level'] = level
         rows.append(summary)
         units.sort_values('count_all', ascending=False).to_csv(
