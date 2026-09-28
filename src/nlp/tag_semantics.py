@@ -14,28 +14,77 @@
 トピック抽出と同じ埋め込みモデルを使うので、追加の学習は要らない。
 """
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
+import os
+import re
 
 import numpy as np
 
 # トピック抽出（BERTopic）と同じモデル。別のモデルを使うと空間が揃わない
 DEFAULT_MODEL = 'all-MiniLM-L6-v2'
 
-# ゲームの中身を表さないタグ。①ゲーム要素の語彙にも、意味の照合にも使わない
-#   Indie / Early Access  開発規模・販売形態であって遊びの中身ではない
-#   Free to Play          ③ビジネス条件。需要量に合算せず阻害要因の別枠に置く
-#                         （docs/decisions.md 2026-08-18）ので①に入れてはいけない
-NOT_ELEMENT_TAGS = {'Indie', 'Early Access', 'Free to Play', 'Free To Play'}
+# タグ判定ファイルの既定パス。生成側（configs への書き出し）と照合側（意味の近さ）で
+# 同じ定義を使うため、判定は1か所（このファイル）だけに置く
+DEFAULT_TAG_JUDGMENTS = 'configs/steam_tags.txt'
+
+# 判定ファイルに書ける見出し（[not_content] など）
+NOT_CONTENT = 'not_content'
+IMPRESSION = 'impression'
+ELEMENT = 'element'
+_JUDGMENT_SECTIONS = (NOT_CONTENT, IMPRESSION, ELEMENT)
 
 
-def element_tags(pool: dict) -> list:
+def load_tag_judgments(path: str = DEFAULT_TAG_JUDGMENTS) -> Dict[str, str]:
+    """タグの判定ファイルを読む（`[見出し]` で区切り・1行1タグ・# はコメント）
+
+    見出しに無いセクションは無視する（topic_category.load_category_words にならう）。
+    ファイルが無いときは黙って空を返さずエラーにする
+    （判定なしを「除外なし」と取り違えて、未判定のタグまで①に入るのを防ぐため）。
+    同じタグが2つの見出しにあってもエラーにする（見出しを移すとき元の行を消し忘れると、
+    後に書いた [element] が黙って勝つため）。
+    """
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f'タグの判定ファイルが見つかりません: {path}')
+
+    judgments: Dict[str, str] = {}
+    current = None
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            header = re.fullmatch(r'\[(\w+)\]', line)
+            if header:
+                current = header.group(1).lower()
+                continue
+            if current in _JUDGMENT_SECTIONS:
+                if line in judgments:
+                    raise ValueError(f'タグ {line} が [{judgments[line]}] と [{current}] の'
+                                     f'両方にあります: {path}')
+                judgments[line] = current
+    return judgments
+
+
+def element_tags(pool: dict, judgments: Optional[Dict[str, str]] = None) -> list:
     """母集団から①ゲーム要素の語彙になるタグを集める
 
-    生成側（configs への書き出し）と照合側（意味の近さ）で同じ語彙を使うため、
-    ここに1つだけ置く。片方にしか除外が効いていないと、`free` が①に入る。
+    1. 母集団のタグを集める
+    2. 判定の無いタグがあれば ValueError で止める（新しいタグを黙って①に入れないため）
+    3. `element` と判定されたタグだけを sorted で返す
+
+    Args:
+        judgments: タグ → 判定（not_content / impression / element）。
+            省略時は DEFAULT_TAG_JUDGMENTS を読む
     """
+    if judgments is None:
+        judgments = load_tag_judgments()
+
     tags = {t for v in pool.values() if isinstance(v, dict) for t in (v.get('tags') or [])}
-    return sorted(t for t in tags if t not in NOT_ELEMENT_TAGS)
+    unjudged = sorted(t for t in tags if t not in judgments)
+    if unjudged:
+        raise ValueError(f'判定の無いタグがあります: {", ".join(unjudged)}'
+                         '（新しいタグは判定ファイルに追記すること）')
+    return sorted(t for t in tags if judgments[t] == ELEMENT)
 
 
 def load_encoder(model_name: str = DEFAULT_MODEL):

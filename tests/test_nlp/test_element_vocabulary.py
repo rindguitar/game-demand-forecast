@@ -2,7 +2,7 @@
 ①ゲーム要素の語彙を母集団のタグから作るスクリプトのテスト
 
 語彙を人が書き尽くすのは続かないので、Steamが整備しているタグを流用する。
-除くのは「ゲームの中身を表していない」タグだけ。
+除くのは「ゲームの中身を表していない」タグと、「遊んだ結果の感想」のタグ。
 """
 
 import json
@@ -24,13 +24,25 @@ def test_collect_tags_gathers_across_games(tmp_path):
     """母集団の全ゲームからタグを集めて重複を畳む"""
     path = _pool(tmp_path, {'1': {'tags': ['Roguelike', 'Horror']},
                             '2': {'tags': ['Horror', 'Sandbox']}})
-    assert collect_tags(path) == ['Horror', 'Roguelike', 'Sandbox']
+    judgments = {'Roguelike': 'element', 'Horror': 'element', 'Sandbox': 'element'}
+    assert collect_tags(path, judgments) == ['Horror', 'Roguelike', 'Sandbox']
 
 
 def test_collect_tags_drops_non_elements(tmp_path):
     """開発規模・販売形態・課金モデルのタグは①ではないので除く"""
     path = _pool(tmp_path, {'1': {'tags': ['Indie', 'Early Access', 'Free to Play', 'Horror']}})
-    assert collect_tags(path) == ['Horror']
+    judgments = {
+        'Indie': 'not_content', 'Early Access': 'not_content',
+        'Free to Play': 'not_content', 'Horror': 'element',
+    }
+    assert collect_tags(path, judgments) == ['Horror']
+
+
+def test_collect_tags_drops_impression_tags(tmp_path):
+    """遊んだ結果の感想（Addictive 等）は遊ぶ前に分からないので①ではないため除く"""
+    path = _pool(tmp_path, {'1': {'tags': ['Addictive', 'Horror']}})
+    judgments = {'Addictive': 'impression', 'Horror': 'element'}
+    assert collect_tags(path, judgments) == ['Horror']
 
 
 def test_collect_tags_keeps_how_you_play(tmp_path):
@@ -39,13 +51,15 @@ def test_collect_tags_keeps_how_you_play(tmp_path):
     似ているかの判定では除外するが（TAG_NOISE）、①の語彙としては有効。
     """
     path = _pool(tmp_path, {'1': {'tags': ['Co-op', 'PvP', 'Multiplayer']}})
-    assert collect_tags(path) == ['Co-op', 'Multiplayer', 'PvP']
+    judgments = {'Co-op': 'element', 'PvP': 'element', 'Multiplayer': 'element'}
+    assert collect_tags(path, judgments) == ['Co-op', 'Multiplayer', 'PvP']
 
 
 def test_collect_tags_tolerates_games_without_tags(tmp_path):
     """タグを持たないゲームがあっても落ちない（母集団の143本が該当）"""
     path = _pool(tmp_path, {'1': {'tags': ['Horror']}, '2': {}, '3': {'tags': []}})
-    assert collect_tags(path) == ['Horror']
+    judgments = {'Horror': 'element'}
+    assert collect_tags(path, judgments) == ['Horror']
 
 
 def test_replace_section_appends_when_absent():

@@ -173,6 +173,7 @@ hundreds hours
 addictive
 addicted
 addicting
+cozy
 # 時間つぶし
 pass time
 kill time
@@ -221,7 +222,7 @@ song silk
 
 # ①ゲーム要素の語彙（自動生成・手で編集しない）
 # scripts/nlp/update_element_vocabulary.py が母集団のSteamタグから作る。
-# 除いているのは開発規模・販売形態・課金モデルのタグだけ（→ NOT_ELEMENTS）。
+# 除いているのは configs/steam_tags.txt で [not_content] [impression] と判定したタグ。
 [element]
 1980s
 2.5d
@@ -239,7 +240,6 @@ action rpg
 action rts
 action roguelike
 action-adventure
-addictive
 adventure
 agriculture
 aliens
@@ -249,14 +249,12 @@ arcade
 arena shooter
 artificial intelligence
 assassins
-atmospheric
 automation
 automobile sim
 base building
 basketball
 battle royale
 beat 'em up
-beautiful
 board game
 boomer shooter
 building
@@ -277,7 +275,6 @@ choose your own adventure
 cinematic
 city builder
 class-based
-classic
 cleaning
 co-op
 co-op campaign
@@ -292,7 +289,6 @@ comic book
 competitive
 controller
 cooking
-cozy
 crafting
 creature collector
 crime
@@ -311,7 +307,6 @@ design & illustration
 destruction
 detective
 dialogue heavy
-difficult
 dinosaurs
 diplomacy
 dragons
@@ -322,9 +317,6 @@ dystopian
 economy
 education
 elves
-emotional
-epic
-episodic
 escape room
 espionage
 exploration
@@ -342,14 +334,12 @@ first-person
 fishing
 flight
 football (soccer)
-funny
 futuristic
 gambling
 god game
 gore
 gothic
 grand strategy
-great soundtrack
 gun customization
 hack and slash
 hacking
@@ -365,7 +355,6 @@ horror
 horses
 hunting
 idler
-immersive
 immersive sim
 incremental
 inventory management
@@ -381,7 +370,6 @@ local co-op
 local multiplayer
 loot
 looter shooter
-lore-rich
 lovecraftian
 mmorpg
 moba
@@ -448,10 +436,6 @@ real time tactics
 real-time
 real-time with pause
 realistic
-reboot
-relaxing
-remake
-replay value
 resource management
 retro
 rhythm
@@ -467,7 +451,6 @@ satire
 sci-fi
 science
 score attack
-sequel
 sexual content
 shoot 'em up
 shooter
@@ -481,7 +464,6 @@ snow
 social deduction
 software
 souls-like
-soundtrack
 space
 space sim
 spectacle fighter
@@ -489,7 +471,6 @@ split screen
 sports
 stealth
 steampunk
-story rich
 strategy
 strategy rpg
 stylized
@@ -523,7 +504,6 @@ turn-based
 turn-based combat
 turn-based strategy
 turn-based tactics
-tutorial
 underwater
 vr
 vampires
@@ -536,7 +516,6 @@ walking simulator
 war
 wargame
 western
-wholesome
 world war ii
 wuxia
 zombies

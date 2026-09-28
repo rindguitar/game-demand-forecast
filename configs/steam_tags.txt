@@ -1,0 +1,343 @@
+# タグの判定（1行1タグ・# はコメント）
+#
+# ①ゲーム要素の語彙（tag_semantics.element_tags）に使うタグをここで判定する。
+# 基準は「遊ぶ前に分かる、ゲームの中身」。次の2つは①にしない。
+#
+# 見出し:
+#   [not_content]  ゲームの中身を表さない … 開発規模・販売形態・シリーズ・導入の作り
+#   [impression]   遊んだ結果の感想        … 遊ぶ前には分からない
+#   [element]      上の2つ以外            … ①ゲーム要素
+#
+# Steamタグは閉じた語彙で、ゲームを増やしてもほぼ増えない。そのため全タグに一度だけ
+# 判定を付ける。判定の無いタグが母集団に出たら element_tags() が ValueError で止まるので、
+# 追記して判定すること。
+#
+# docs/decisions.md 2026-09-28
+
+[not_content]
+Early Access
+Episodic
+Free To Play
+Free to Play
+Indie
+Reboot
+Remake
+Sequel
+Tutorial
+
+[impression]
+Addictive
+Atmospheric
+Beautiful
+Classic
+Cozy
+Difficult
+Emotional
+Epic
+Funny
+Great Soundtrack
+Immersive
+Lore-Rich
+Relaxing
+Replay Value
+Soundtrack
+Story Rich
+Wholesome
+
+[element]
+1980s
+2.5D
+2D
+2D Fighter
+2D Platformer
+3D
+3D Fighter
+3D Platformer
+4 Player Local
+4X
+ATV
+Action
+Action RPG
+Action RTS
+Action Roguelike
+Action-Adventure
+Adventure
+Agriculture
+Aliens
+Alternate History
+Anime
+Arcade
+Arena Shooter
+Artificial Intelligence
+Assassins
+Automation
+Automobile Sim
+Base Building
+Basketball
+Battle Royale
+Beat 'em up
+Board Game
+Boomer Shooter
+Building
+Bullet Hell
+Bullet Time
+CRPG
+Capitalism
+Card Battler
+Card Game
+Cartoon
+Cartoony
+Casual
+Cats
+Character Action Game
+Character Customization
+Choices Matter
+Choose Your Own Adventure
+Cinematic
+City Builder
+Class-Based
+Cleaning
+Co-op
+Co-op Campaign
+Cold War
+Collectathon
+Colony Sim
+Colorful
+Combat
+Combat Racing
+Comedy
+Comic Book
+Competitive
+Controller
+Cooking
+Crafting
+Creature Collector
+Crime
+Cult
+Cute
+Cyberpunk
+Dark
+Dark Comedy
+Dark Fantasy
+Dark Humor
+Dating Sim
+Deckbuilding
+Decorating
+Demons
+Design & Illustration
+Destruction
+Detective
+Dialogue Heavy
+Dinosaurs
+Diplomacy
+Dragons
+Driving
+Dungeon Crawler
+Dwarves
+Dystopian
+Economy
+Education
+Elves
+Escape Room
+Espionage
+Exploration
+Extraction Shooter
+FPS
+Faith
+Family Friendly
+Fantasy
+Farming
+Farming Sim
+Fast-Paced
+Female Protagonist
+Fighting
+First-Person
+Fishing
+Flight
+Football (Soccer)
+Futuristic
+Gambling
+God Game
+Gore
+Gothic
+Grand Strategy
+Gun Customization
+Hack and Slash
+Hacking
+Hand-drawn
+Heist
+Hentai
+Hero Shooter
+Hex Grid
+Hidden Object
+Historical
+Hobby Sim
+Horror
+Horses
+Hunting
+Idler
+Immersive Sim
+Incremental
+Inventory Management
+Investigation
+Isometric
+JRPG
+Job Simulator
+LGBTQ+
+Level Editor
+Life Sim
+Linear
+Local Co-Op
+Local Multiplayer
+Loot
+Looter Shooter
+Lovecraftian
+MMORPG
+MOBA
+Magic
+Management
+Martial Arts
+Massively Multiplayer
+Mechs
+Medieval
+Memes
+Metroidvania
+Military
+Minigames
+Minimalist
+Mining
+Mod
+Moddable
+Modern
+Mouse Only
+Multiplayer
+Multiple Endings
+Music
+Mystery
+Mythology
+Nature
+Naval
+Naval Combat
+Ninja
+Noir
+Nonlinear
+Nudity
+Offroad
+Old School
+Online Co-Op
+Open World
+Open World Survival Craft
+Organizing
+Outbreak Sim
+Parkour
+Party
+Party Game
+Party-Based RPG
+Perma Death
+Physics
+Pirates
+Pixel Graphics
+Platformer
+Point & Click
+Political Sim
+Post-apocalyptic
+Precision Platformer
+Procedural Generation
+Psychological
+Psychological Horror
+Puzzle
+Puzzle Platformer
+PvE
+PvP
+Quick-Time Events
+RPG
+RTS
+Racing
+Real Time Tactics
+Real-Time
+Real-Time with Pause
+Realistic
+Resource Management
+Retro
+Rhythm
+Robots
+Roguelike
+Roguelike Deckbuilder
+Roguelite
+Romance
+Sailing
+Samurai
+Sandbox
+Satire
+Sci-fi
+Science
+Score Attack
+Sexual Content
+Shoot 'Em Up
+Shooter
+Shop Keeper
+Short
+Side Scroller
+Simulation
+Singleplayer
+Sniper
+Snow
+Social Deduction
+Software
+Souls-like
+Space
+Space Sim
+Spectacle fighter
+Split Screen
+Sports
+Stealth
+Steampunk
+Strategy
+Strategy RPG
+Stylized
+Submarine
+Superhero
+Supernatural
+Surreal
+Survival
+Survival Horror
+Swordplay
+Tabletop
+Tactical
+Tactical RPG
+Tanks
+Team-Based
+Third Person
+Third-Person Shooter
+Thriller
+Time Management
+Time Travel
+Top-Down
+Top-Down Shooter
+Touch-Friendly
+Tower Defense
+TrackIR
+Trading
+Trading Card Game
+Trains
+Transportation
+Turn-Based
+Turn-Based Combat
+Turn-Based Strategy
+Turn-Based Tactics
+Underwater
+VR
+Vampires
+Vehicular Combat
+Vikings
+Violent
+Visual Novel
+Voxel
+Walking Simulator
+War
+Wargame
+Western
+World War II
+Wuxia
+Zombies
+eSports
