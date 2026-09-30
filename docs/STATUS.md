@@ -721,7 +721,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **64本・束ねないで共起を引き直した（×2で①同士3本以上16組）。次は供給側との突き合わせ** |
 
-**作業中: `fix/contentless-words`**（弱い1票だけで①になっていたトピックを中身なしへ）。PR のレビュー待ち。
+**PR #51 マージ済み**（弱い1票だけで①になっていたトピックを中身なしへ）。**次は上の1（#42 の続き・供給側との突き合わせ）**。
 
 ### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
