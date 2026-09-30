@@ -5,16 +5,29 @@ Issue #42「需要スコアを部品の合算から組み合わせへ広げる�
 部品ごとに合算すると「どの組み合わせが未充足か」が消えるので、その手前を見る。
 
 **出現ではなくリフトで測る。** 素朴に「同じゲームに出るか」で数えると、
-時系列に乗る35単位のうち21個が全24本に出るためほぼ全結合になる。
+ほぼ全結合になる（24本・300単位での実測: 時系列に乗る35単位のうち21個が全24本に出た）。
 
 粒度は Issue #37 の結論に従い、既定でマージ木のレベル300を使う（→ docs/decisions.md 2026-09-09）。
 
-⚠️ 24本では「このペアが無い = 未開拓」は言えない。300部品ならペアは44,850通りあり、
-24本では原理的に埋まらない。読めるのは①レシピと②観測された共起まで。
+**単位の仕分けは、束ねるかどうかで決まる**（--level の数値ではなく、単位の中身で判定）。
+  束ねない（全単位がトピック1個）: 公式の仕分け（categorize_topics.py の出力）を
+    --categories-csv で渡し、そのまま使う。共起で仕分け直すと公式と食い違うため。渡さないと止まる
+  束ねた: トピック単位の分類は束に当てられないので、単位のキーワードでその場で仕分ける。
+    --categories-csv を渡すと止まる
+
+⚠️ ペアの通り数（除外後に残った単位が n 個なら n×(n-1)/2）に対してゲームが少ないと、
+「このペアが無い = 未開拓」は言えない。読めるのは①レシピと②観測された共起まで。
+実行の最後に、実際のゲーム数とペアの通り数を出す。
 
 使い方:
     docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py
     docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py --min-lift 3.0
+
+    # 64本・束ねない（526は64本モデルのトピック数）
+    docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \\
+        --model models/topic_64 --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \\
+        --level 526 --categories-csv data/timeseries/topic_categories_64.csv \\
+        --outdir data/timeseries/cooccurrence_64
 """
 
 import argparse
@@ -32,6 +45,7 @@ from src.nlp.topic_category import (  # noqa: E402
 )
 from src.nlp.topic_cooccurrence import (  # noqa: E402
     build_cooccurrence, build_game_unit_matrix, compute_lift, extract_recipes,
+    has_bundled_units, unit_categories_from_topics,
 )
 from src.nlp.topic_granularity import (  # noqa: E402
     CTFIDF, EMBEDDING, build_linkage, cut_levels, merged_keywords, topic_matrix,
@@ -43,12 +57,18 @@ def parse_args():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--model', default='models/topic_full')
     parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv')
-    parser.add_argument('--categories', default='configs/topic_categories.txt')
+    parser.add_argument('--categories', default='configs/topic_categories.txt',
+                        help='分類語彙。束ねたときのその場の仕分けだけで使う')
+    parser.add_argument('--categories-csv', default=None,
+                        help='公式の仕分け（categorize_topics.py の出力。topic_id / category 列）。'
+                             '束ねないときは必須、束ねたときは指定できない')
     parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
-                        help='①の語彙にするSteamタグの取得元（必須。証拠なしで分類しないため）')
+                        help='①の語彙にするSteamタグの取得元。束ねたときのその場の仕分けだけで使う'
+                             '（証拠なしで分類しないため必須）')
     parser.add_argument('--outdir', default='data/timeseries/cooccurrence')
     parser.add_argument('--level', type=int, default=300,
-                        help='マージ木を切る個数（既定300は Issue #37 の結論）')
+                        help='マージ木を切る個数（既定300は Issue #37 の結論）。'
+                             '全トピックが別々の単位になる個数なら「束ねない」扱い')
     parser.add_argument('--distance', choices=[CTFIDF, EMBEDDING], default=EMBEDDING)
     parser.add_argument('--min-lift', type=float, default=2.0,
                         help='そのゲームらしいと数える下限（平均の何倍か）')
@@ -59,6 +79,30 @@ def parse_args():
     parser.add_argument('--top', type=int, default=8, help='画面に出すレシピの行数')
     parser.add_argument('--top-pairs', type=int, default=15, help='画面に出す共起ペアの行数')
     return parser.parse_args()
+
+
+def classify_units(args, mapping, keywords):
+    """単位 → 分類 を作る。束ねるかどうかで、分類の出どころが変わる"""
+    # 1. 単位の中身から、束ねているかを判定する
+    # 2a. 束ねない: --categories-csv を必須にして、トピックの分類（公式）を単位に当てる
+    # 2b. 束ねた: --categories-csv は指定不可。単位のキーワードでその場で仕分ける
+    if not has_bundled_units(mapping):
+        if not args.categories_csv:
+            raise ValueError('束ねないときは公式の仕分けを --categories-csv で渡すこと'
+                             '（共起の側で仕分け直すと、公式と食い違う単位が出るため）')
+        table = pd.read_csv(args.categories_csv, usecols=['topic_id', 'category'])
+        topic_categories = {int(t): c for t, c in zip(table['topic_id'], table['category'])}
+        print(f"束ねない: 公式の仕分けを使う（{args.categories_csv}）")
+        return unit_categories_from_topics(mapping, topic_categories)
+
+    if args.categories_csv:
+        raise ValueError('束ねたときは --categories-csv を指定できません'
+                         '（トピック単位の分類は、複数トピックの束に当てられないため）')
+    print("束ねた: 単位のキーワードでその場で仕分ける")
+    category_words = load_category_words(args.categories)
+    tags = element_tags(load_pool(args.pool))
+    classified = classify_with_evidence(list(keywords.items()), category_words, tags)
+    return {c.topic_id: c.category for c in classified}
 
 
 def main():
@@ -76,21 +120,22 @@ def main():
     mapping = cut_levels(build_linkage(matrix_source), topic_ids, [args.level])[args.level]
     keywords = merged_keywords(model, mapping, weights)
     df['unit'] = df['topic_id'].map(mapping).fillna(-1).astype(int)
-    print(f"レビュー {len(df):,}件 / ゲーム {df['game_name'].nunique()}本 "
+    n_games = df['game_name'].nunique()
+    print(f"レビュー {len(df):,}件 / ゲーム {n_games}本 "
           f"/ 単位 {len(set(mapping.values()))}個（レベル{args.level}・{args.distance}）")
 
     # 2. 単位を仕分ける（①②③以外はレシピから外す）
-    category_words = load_category_words(args.categories)
-    tags = element_tags(load_pool(args.pool))
-    classified = classify_with_evidence(list(keywords.items()), category_words, tags)
-    categories = {c.topic_id: c.category for c in classified}
+    categories = classify_units(args, mapping, keywords)
     if not args.keep_noise:
         noise = {u for u, c in categories.items() if c not in MEANINGFUL_CATEGORIES}
         df = df[~df['unit'].isin(noise)]
         print(f"レシピから外した単位: {len(noise)}個（中身なし・固有名詞・未分類・要手動判定）")
 
     # 3. ゲーム × 単位 の表からリフトを出し、レシピを作る
+    #    ペアの通り数は、除外後に残った単位の数 n（表の列数）から n×(n-1)/2 で出す
     counts = build_game_unit_matrix(df)
+    n_units = counts.shape[1]
+    n_pairs_possible = n_units * (n_units - 1) // 2
     lift = compute_lift(counts)
     recipes = extract_recipes(counts, lift, args.min_lift, args.min_count)
     recipes['keywords'] = recipes['unit'].map(keywords)
@@ -118,7 +163,7 @@ def main():
 
     print(f"\n{'=' * 84}\n部品の数（1ゲームあたり）: 中央値 {sizes.median():.0f} / "
           f"最小 {sizes.min()} / 最大 {sizes.max()}\n{'=' * 84}")
-    print(f"\n共起したペア: {len(pairs):,}組（44,850通り中）"
+    print(f"\n共起したペア: {len(pairs):,}組（{n_pairs_possible:,}通り中）"
           if not pairs.empty else "\n共起なし")
     if not pairs.empty:
         print(f"\n2本以上のゲームで同居したペア（上位{args.top_pairs}）")
@@ -128,7 +173,8 @@ def main():
 
     print(f"\n✅ レシピ: {os.path.join(args.outdir, 'recipes.csv')}")
     print(f"✅ 共起表: {os.path.join(args.outdir, 'pairs.csv')}")
-    print("\n⚠️ 24本では「このペアが無い = 未開拓」は言えない（ペアは44,850通り）")
+    print(f"\n⚠️ {n_games}本では「このペアが無い = 未開拓」は言えない"
+          f"（ペアは{n_pairs_possible:,}通り）")
 
 
 if __name__ == '__main__':

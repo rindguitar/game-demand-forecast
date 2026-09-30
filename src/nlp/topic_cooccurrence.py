@@ -4,14 +4,51 @@
 「どの部品が同じゲームに同居しているか」を出す。需要スコアを部品ごとに合算すると
 どの組み合わせが未充足かが消えるため（→ Issue #42）、その手前の材料を作る。
 
-**出現では測らない。** 時系列に乗る35単位のうち21個が全24本に出るので、
-「同じゲームに出るか」で測るとほぼ全結合になり情報にならない。
+**出現では測らない。** 「同じゲームに出るか」で測るとほぼ全結合になり情報にならない
+（24本・300単位での実測: 時系列に乗る35単位のうち21個が全24本に出た）。
 そのゲームらしさ（リフト）で重み付けし、閾値を超えたものだけを同居と数える。
 """
 
-from typing import List
+from typing import Dict, List
 
 import pandas as pd
+
+
+def has_bundled_units(mapping: Dict[int, int]) -> bool:
+    """束ねた単位（2トピック以上）が1つでもあるか
+
+    1. 単位の種類を数える → 2. トピックの数と比べる。
+    トピックは必ず1つの単位に入るので、単位のほうが少なければどこかで束ねている。
+    """
+    return len(set(mapping.values())) < len(mapping)
+
+
+def unit_categories_from_topics(mapping: Dict[int, int],
+                                topic_categories: Dict[int, str]) -> Dict[int, str]:
+    """束ねないときの「単位 → 分類」を、トピックごとの公式の分類から引く
+
+    トピック単位の分類は、複数トピックの束には当てられないので束ねたときは使えない。
+    分類に無いトピックは既定値で埋めない（別のモデル・別の版のCSVを黙って通さないため）。
+
+    Args:
+        mapping: 元トピック → 単位（cut_levels の戻り値の1レベル分）
+        topic_categories: 元トピック → 分類（categorize_topics.py の出力から作る）
+
+    Returns:
+        単位 → 分類
+
+    Raises:
+        ValueError: 束ねた単位がある / 分類に無いトピックがある
+    """
+    # 1. 束ねた単位があれば止める → 2. 分類に無いトピックがあれば止める
+    # → 3. 各単位に、その単位に入ったトピックの分類をそのまま当てる
+    if has_bundled_units(mapping):
+        raise ValueError('束ねた単位（2トピック以上）があるので、トピック単位の分類は当てられません')
+    missing = sorted(set(mapping) - set(topic_categories))
+    if missing:
+        raise ValueError(f'分類に無いトピックが{len(missing)}個あります'
+                         f'（既定値で埋めずに止める）: {missing}')
+    return {unit: topic_categories[topic] for topic, unit in mapping.items()}
 
 
 def build_game_unit_matrix(df: pd.DataFrame, unit_column: str = 'unit',

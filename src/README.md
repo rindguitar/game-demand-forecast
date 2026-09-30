@@ -79,6 +79,10 @@ flowchart LR
 `tag_semantics.element_tags` で①の語彙にする → `topic_category.classify_with_evidence` で仕分ける）。
 仕分けの入口が1つなので、①の証拠（タグとの意味の近さ）を付け忘れることがありません。
 
+ただし `build_topic_cooccurrence.py` は、**束ねないとき**（全単位がトピック1個）はこの箱を通らず、
+`categorize_topics.py` が出した分類CSVをそのまま単位に当てます（`topic_cooccurrence.unit_categories_from_topics`）。
+箱を通るのは束ねたときだけです。
+
 図に描いていない線が2本あります。`compare_topic_granularity.py` は **`timeseries/weekly.py`** も、
 `build_topic_cooccurrence.py` は **`nlp/topic_granularity.py`**（レベル300で単位を作る）も使います。
 線を描くと交差するので本文に出しました。
@@ -143,7 +147,7 @@ flowchart LR
 | `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `topic_granularity.py` | 抽出済みのトピックをマージ木にまとめ、任意の個数で切って粗い版を作る |
 | `tag_semantics.py` | トピックとSteamタグを「意味の近さ」で照合する（①の証拠を作る）。①にするタグの判定は `configs/steam_tags.txt` |
-| `topic_cooccurrence.py` | ゲームごとのレシピ（そのゲームらしい部品）と、部品ペアの共起を出す |
+| `topic_cooccurrence.py` | ゲームごとのレシピ（そのゲームらしい部品）と、部品ペアの共起を出す。束ねないときの単位の分類も、公式の分類から引く |
 
 **主要関数（topic.py）:**
 - `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
@@ -199,8 +203,14 @@ flowchart LR
   束ね方によらず埋め込み空間で測るので、語の重なりで束ねた結果の審判にも使える
 
 **主要関数（topic_cooccurrence.py）:**
+- `has_bundled_units(mapping)` — 束ねた単位（2トピック以上）が1つでもあるか。単位の数がトピックの数より
+  少なければ束ねている。スクリプトが「公式の分類を使うか、その場で仕分けるか」を分ける判定に使う
+- `unit_categories_from_topics(mapping, topic_categories)` — **束ねないとき**の「単位 → 分類」を、
+  トピックごとの公式の分類（`categorize_topics.py` の出力）から引く。束ねた単位があれば `ValueError`
+  （トピック単位の分類は束に当てられない）、分類に無いトピックがあっても `ValueError`（既定値で埋めない）。
+  単位の番号とトピックIDはずれる（64本・526単位では全単位が +1）ので、対応は必ず `mapping` で取る
 - `compute_lift(matrix)` — そのゲームらしさ = そのゲームでの出現率 ÷ 全体での出現率。
-  **出現では測らない**（時系列に乗る35単位のうち21個が全24本に出るのでほぼ全結合になる）
+  **出現では測らない**（ほぼ全結合になる。24本・300単位での実測: 時系列に乗る35単位のうち21個が全24本に出た）
 - `extract_recipes(matrix, lift, min_lift, min_count)` — ゲームごとのレシピ。
   件数の下限も置く（リフトは分母が小さいと跳ねるため）
 - `build_cooccurrence(recipes)` — 同じレシピに入った部品ペアを、ゲーム数で数える

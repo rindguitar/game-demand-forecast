@@ -13,6 +13,8 @@ from src.nlp.topic_cooccurrence import (
     build_game_unit_matrix,
     compute_lift,
     extract_recipes,
+    has_bundled_units,
+    unit_categories_from_topics,
 )
 
 
@@ -20,6 +22,43 @@ def _reviews(rows):
     """(ゲーム名, 単位, 件数) からレビューのDataFrameを作る"""
     return pd.DataFrame([{'game_name': g, 'unit': u}
                          for g, u, n in rows for _ in range(n)])
+
+
+def test_has_bundled_units_one_topic_per_unit_is_false():
+    """全単位がトピック1個だけなら、束ねていない"""
+    assert not has_bundled_units({0: 5, 1: 6, 2: 7})
+
+
+def test_has_bundled_units_two_topics_in_one_unit_is_true():
+    """1つでも2トピック以上の単位があれば、束ねている"""
+    assert has_bundled_units({0: 5, 1: 5, 2: 7})
+
+
+def test_unit_categories_unbundled_copies_topic_category_to_unit():
+    """束ねていなければ、公式の分類がそのまま単位に付く
+
+    単位の番号とトピックIDはずれることがあるので、対応はマッピングで取る。
+    """
+    mapping = {0: 3, 1: 1, 2: 2}
+    topic_categories = {0: 'element', 1: 'quality', 2: 'unclassified'}
+    assert unit_categories_from_topics(mapping, topic_categories) == {
+        3: 'element', 1: 'quality', 2: 'unclassified'}
+
+
+def test_unit_categories_bundled_unit_raises():
+    """2トピック以上を束ねた単位があると止まる（トピック単位の分類は束に当てられない）"""
+    mapping = {0: 1, 1: 1, 2: 2}
+    topic_categories = {0: 'element', 1: 'element', 2: 'quality'}
+    with pytest.raises(ValueError):
+        unit_categories_from_topics(mapping, topic_categories)
+
+
+def test_unit_categories_topic_missing_from_categories_raises():
+    """分類に無いトピックがあれば、既定値で埋めずに止まる"""
+    mapping = {0: 1, 1: 2, 2: 3}
+    topic_categories = {0: 'element', 2: 'quality'}
+    with pytest.raises(ValueError):
+        unit_categories_from_topics(mapping, topic_categories)
 
 
 def test_matrix_excludes_outlier():

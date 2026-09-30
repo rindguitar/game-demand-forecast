@@ -146,7 +146,7 @@ Addictive等の「遊んだ結果の感想」は①にしない）。判定の�
 需要スコアに合算するのは①だけで、③は阻害要因として別枠に持ちます（`docs/decisions.md` 2026-08-18）。
 
 近さを測って仕分けるまでは `classify_with_evidence()`（`src/nlp/topic_category.py`）1つに閉じていて、
-`compare_topic_granularity.py` と `build_topic_cooccurrence.py` も同じ入口を通ります。
+`compare_topic_granularity.py` と `build_topic_cooccurrence.py`（束ねたとき）も同じ入口を通ります。
 **証拠は省略できません**。省略できると、文字の一致だけの古い規則に黙って戻るためです（`docs/decisions.md` 2026-09-27）。
 
 `bundle_topics.py` は、週10件に届かない小さいトピックだけをSteamタグの語彙に寄せます。
@@ -185,21 +185,44 @@ flowchart LR
 flowchart LR
     M3{{"models/topic_full"}} --> CO["build_topic_cooccurrence.py"]
     W3[("reviews_timeseries<br/>_with_topics.csv")] --> CO
-    V3[("configs/<br/>topic_categories.txt")] --> CO
+    C3[("topic_categories.csv<br/>束ねないとき")] --> CO
+    V3[("configs/topic_categories.txt<br/>束ねたとき")] --> CO
     CO --> RE[("cooccurrence/<br/>recipes.csv")]
     CO --> PA[("cooccurrence/<br/>pairs.csv")]
 ```
 
 `build_topic_cooccurrence.py` は「そのゲームらしさ（リフト）」でゲームごとのレシピを作り、
 同じレシピに入った部品のペアを数えます（Issue #42）。**出現では測りません** ——
-素朴に「同じゲームに出るか」で数えると、時系列に乗る35単位のうち21個が全24本に出るため
-ほぼ全結合になり情報にならないからです。
+素朴に「同じゲームに出るか」で数えるとほぼ全結合になり情報にならないからです
+（24本・300単位での実測: 時系列に乗る35単位のうち21個が全24本に出ました）。
 
-上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます
-（単位を `classify_with_evidence()` で仕分けるため）。
+**単位の仕分けは、束ねるかどうかで出どころが変わります。** 判定は `--level` の数値ではなく、
+単位の中身（全単位がトピック1個だけか）で行います。
+
+- **束ねない**（64本モデルなら `--level 526`）: `categorize_topics.py` が出した `topic_categories_*.csv` を
+  `--categories-csv` で渡し、トピックの分類をそのまま単位に当てます。**渡さないと止まります**。
+  CSVに無いトピックがあっても、既定値で埋めずに止まります。共起の側で仕分け直すと、
+  需要スコアが使う公式の仕分けと食い違う単位が出るためです
+  （`wife, partner, girlfriend…` は、公式では未分類なのに共起の仕分けでは①になっていた）。
+  この場合、`configs/topic_categories.txt`（分類語彙）も `pool_cache.json` も読みません
+- **束ねた**（既定の300など）: トピック単位の分類は複数トピックの束に当てられないので、
+  単位のキーワードを `classify_with_evidence()` にかけてその場で仕分けます。
+  上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます。
+  **`--categories-csv` を渡すと止まります**
+
+64本・束ねないときの実行例:
+
+```bash
+docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \
+    --model models/topic_64 --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --level 526 --categories-csv data/timeseries/topic_categories_64.csv \
+    --outdir data/timeseries/cooccurrence_64
+```
+
 **レシピに残すのは①②③だけ**で、中身なし・固有名詞・未分類・要手動判定は外します（`--keep-noise` で外さない）。
 
-⚠️ **24本では「このペアが無い = 未開拓」は言えません**（ペアは44,850通り）。
+⚠️ **ペアの通り数に対してゲームが少ないと、「このペアが無い = 未開拓」は言えません。**
+除外後に残った単位が n 個ならペアは n×(n-1)/2 通りあり、実行の最後に実際のゲーム数と通り数を出します。
 読めるのはレシピと、観測された共起までです。
 
 **供給側のタグが代用になるか検証する**
@@ -229,7 +252,7 @@ flowchart LR
 | `categorize_topics.py` | トピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
-| `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す（Issue #42） |
+| `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す。束ねないときは公式の分類CSV（`--categories-csv`）を使う（Issue #42） |
 | `validate_tag_supply.py` | 供給側のタグがロスター拡大の代用になるか検証する（Issue #42） |
 | `update_element_vocabulary.py` | ①ゲーム要素の語彙を母集団のSteamタグから作り直す。除くタグの判定は `configs/steam_tags.txt`（Issue #45） |
 
