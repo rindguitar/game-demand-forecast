@@ -137,6 +137,8 @@ day one dlc
 complete edition
 
 [contentless]
+# 注意: 語句はキーワードの境目もまたいで当たる（`game game` は `friends game, game friends` にも当たる）。
+#       足す前に、狙っていないトピックに当たらないか全トピックで確かめること
 # 賞賛・罵倒（中身を伴わない）
 best game
 best games
@@ -174,6 +176,9 @@ addictive
 addicted
 addicting
 cozy
+# 遊んだ結果の感想（2026-09-30: `funny game` が Comedy との弱い一致だけで①になっていた）
+funny
+hilarious
 # 時間つぶし
 pass time
 kill time
@@ -195,6 +200,8 @@ goon
 # 意味を成していない断片
 heres thing
 thing heres
+really game
+game actually
 
 [propernoun]
 # 束ねる対象から外すためのトピック単位の固有名詞。
