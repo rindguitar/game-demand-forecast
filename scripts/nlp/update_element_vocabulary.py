@@ -7,7 +7,8 @@
 その語彙を人が書き尽くすのは続かないので、**Steamが整備しているタグをそのまま使う**。
 タグは収集時に自動で取れるため、ロスターを広げれば語彙も一緒に広がる。
 
-除くのは「ゲームの中身を表していない」タグだけ（開発規模・販売形態・課金モデル）。
+①の基準は「遊ぶ前に分かる、ゲームの中身」。ゲームの中身を表さないタグ（開発規模・
+販売形態・シリーズ等）と、遊んだ結果の感想（Addictive 等）は①にしない（→ configs/steam_tags.txt）。
 `Multiplayer` や `Co-op` は残す。企画で「協力プレイを入れるか」を決められる要素だから。
 
 使い方:
@@ -19,15 +20,16 @@ import json
 import os
 import re
 import sys
+from typing import Dict, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from src.nlp.tag_semantics import NOT_ELEMENT_TAGS, element_tags  # noqa: E402
+from src.nlp.tag_semantics import element_tags  # noqa: E402
 
 SECTION = 'element'
 HEADER = """# ①ゲーム要素の語彙（自動生成・手で編集しない）
 # scripts/nlp/update_element_vocabulary.py が母集団のSteamタグから作る。
-# 除いているのは開発規模・販売形態・課金モデルのタグだけ（→ tag_semantics.NOT_ELEMENT_TAGS）。"""
+# 除いているのは configs/steam_tags.txt で [not_content] [impression] と判定したタグ。"""
 
 
 def parse_args():
@@ -39,15 +41,15 @@ def parse_args():
     return parser.parse_args()
 
 
-def collect_tags(pool_path: str) -> list:
-    """母集団のタグを集める（中身を表さないものは除く）
+def collect_tags(pool_path: str, judgments: Optional[Dict[str, str]] = None) -> list:
+    """母集団のタグを集める（中身を表さないもの・遊んだ結果の感想は除く）
 
-    除外の定義は src/nlp/tag_semantics.py に置く。意味の照合側と同じ語彙でないと、
-    生成側だけ除いても照合側で①に入ってしまう（実測: `free` が Free to Play に0.66）。
+    判定は configs/steam_tags.txt に1つだけ置く（tag_semantics.element_tags が読む）。
+    生成側と照合側で判定がずれると、`free` が Free to Play に0.66で①に入ってしまう。
     """
     with open(pool_path, encoding='utf-8') as f:
         pool = {k: v for k, v in json.load(f).items() if k != '__order__'}
-    return element_tags(pool)
+    return element_tags(pool, judgments)
 
 
 def replace_section(text: str, tags: list) -> str:
@@ -68,7 +70,7 @@ def main():
     updated = replace_section(text, tags)
 
     print(f'①ゲーム要素の語彙: {len(tags)}語（{args.pool} のタグから）')
-    print(f'  除いたもの: {", ".join(sorted(NOT_ELEMENT_TAGS))}')
+    print('  除いた基準: configs/steam_tags.txt の [not_content] [impression]')
     print(f'  例: {", ".join(tags[:12])}')
     if args.dry_run:
         print('\n--dry-run のため書き換えない')

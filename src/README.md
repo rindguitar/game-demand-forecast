@@ -142,7 +142,7 @@ flowchart LR
 | `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞 / 未分類） |
 | `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `topic_granularity.py` | 抽出済みのトピックをマージ木にまとめ、任意の個数で切って粗い版を作る |
-| `tag_semantics.py` | トピックとSteamタグを「意味の近さ」で照合する（①の証拠を作る） |
+| `tag_semantics.py` | トピックとSteamタグを「意味の近さ」で照合する（①の証拠を作る）。①にするタグの判定は `configs/steam_tags.txt` |
 | `topic_cooccurrence.py` | ゲームごとのレシピ（そのゲームらしい部品）と、部品ペアの共起を出す |
 
 **主要関数（topic.py）:**
@@ -172,6 +172,17 @@ flowchart LR
   （topic_id, keywords, category, hits, tag, tag_score）のNamedTuple
 - `MEANINGFUL_CATEGORIES = (ELEMENT, QUALITY, BUSINESS)` — 中身のある3分類の共通定義。
   束ねる・時系列に乗せる対象を選ぶ側（`build_weekly_series.py` 等）はここを import する
+
+**主要関数（tag_semantics.py）:**
+- `element_tags(pool, judgments=None)` — 母集団のタグから①ゲーム要素の語彙を集める。
+  判定は `configs/steam_tags.txt`（`load_tag_judgments`）から読み、判定の無いタグがあれば
+  `ValueError`（新しいタグを黙って①に入れないため）。除くのは
+  「ゲームの中身を表さないタグ」（`not_content`）と「遊んだ結果の感想」（`impression`）
+- `load_tag_judgments(path)` — 判定ファイルを読む（`[not_content]` `[impression]` `[element]`
+  の見出しで区切り・1行1タグ）。ファイルが無ければ `FileNotFoundError`、
+  同じタグが2つの見出しにあれば `ValueError`（移し替えで元の行を消し忘れても①に残らないように）
+- `match_terms(texts, vocabulary, encoder=None)` — テキストごとに、いちばん意味の近い語と
+  その近さ（コサイン類似度）を返す。`Souls-like` ↔ `soulslike` のような表記ゆれを拾うために使う
 
 **主要関数（topic_bundle.py）:**
 - `load_tag_vocabulary(genres, tags)` — 台帳のジャンル列・タグ列から束ね先を作る（長い順）

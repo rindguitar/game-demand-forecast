@@ -134,7 +134,10 @@ flowchart LR
 `categorize_topics.py` がそれを ①ゲーム要素 / ②品質・運営 / ③ビジネス条件 / 中身なし に仕分けます。
 **①は語彙に当たって初めて①になります**（残余ではありません）。どこにも当たらないものは
 **未分類**に落ちて需要スコアの対象から外れます。①の語彙は `update_element_vocabulary.py` が
-母集団のSteamタグから自動生成するので、手で書き足す必要はありません。
+母集団のSteamタグから自動生成するので、手で書き足す必要はありません。どのタグを①にするかの
+判定は `configs/steam_tags.txt` に1つだけ置く（開発規模・販売形態等の「中身を表さないタグ」と、
+Addictive等の「遊んだ結果の感想」は①にしない）。判定の無い新しいタグが母集団に出ると
+`element_tags()` が止まるので、その場合はこのファイルに追記する。
 
 ①の証拠は**語の一致だけでなく「タグとの意味の近さ」でも受け取ります**。
 `Souls-like` と `soulslike`、`Difficult` と `hard` は文字列では別物ですが、意味では同じです。
@@ -151,7 +154,8 @@ flowchart LR
 
 `categorize_topics.py` と `bundle_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます
 （前者は土台パネルの顔ぶれを `tier` 列から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
-`categorize_topics.py` はさらに `data/timeseries/pool_cache.json`（①の語彙にするSteamタグ）も読みます。
+`categorize_topics.py` はさらに `data/timeseries/pool_cache.json`（①の語彙にするSteamタグ）と、
+その判定ファイル `configs/steam_tags.txt`（既定値・`element_tags()` が読む）も読みます。
 
 **粒度を粗くして比べる**（抽出済みのモデルだけで動く・再学習しない）
 
@@ -168,7 +172,8 @@ flowchart LR
 どのレベルでも同じ物差しで測って並べます。トピックの目標粒度を決めるための材料で
 （Issue #37）、日々のパイプラインには入りません。物差しの中身は `--help` を参照。
 
-上図のほかに `pool_cache.json` も読みます（各レベルの単位を `classify_with_evidence()` で仕分けるため）。
+上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます
+（各レベルの単位を `classify_with_evidence()` で仕分けるため）。
 複数のレベルを仕分けるので、埋め込みモデルは1回だけ読んで使い回します。
 
 細かい側（トピックを増やす方向）はこの方法では作れません。`extract_topics.py` を
@@ -190,7 +195,8 @@ flowchart LR
 素朴に「同じゲームに出るか」で数えると、時系列に乗る35単位のうち21個が全24本に出るため
 ほぼ全結合になり情報にならないからです。
 
-上図のほかに `pool_cache.json` も読みます（単位を `classify_with_evidence()` で仕分けるため）。
+上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます
+（単位を `classify_with_evidence()` で仕分けるため）。
 **レシピに残すのは①②③だけ**で、中身なし・固有名詞・未分類・要手動判定は外します（`--keep-noise` で外さない）。
 
 ⚠️ **24本では「このペアが無い = 未開拓」は言えません**（ペアは44,850通り）。
@@ -225,7 +231,7 @@ flowchart LR
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
 | `build_topic_cooccurrence.py` | ゲームごとのレシピと、部品ペアの共起を出す（Issue #42） |
 | `validate_tag_supply.py` | 供給側のタグがロスター拡大の代用になるか検証する（Issue #42） |
-| `update_element_vocabulary.py` | ①ゲーム要素の語彙を母集団のSteamタグから作り直す（Issue #45） |
+| `update_element_vocabulary.py` | ①ゲーム要素の語彙を母集団のSteamタグから作り直す。除くタグの判定は `configs/steam_tags.txt`（Issue #45） |
 
 **使用方法:**
 ```bash
