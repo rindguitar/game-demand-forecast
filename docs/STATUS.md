@@ -729,6 +729,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 
 #45 はクローズ済み（2026-09-30）。残りの照合の誤り・混ざり物・5語と6語のずれは、下の「未解決」にある。
 #42 は「今は需要スコアを組み合わせへ広げない」で区切った（2026-10-01・再開の条件は `docs/decisions.md`）。
+改善の余地があるので、Issue は開けたままにしている（ユーザーの判断）。
 
 理由: #39 は再抽出（1回24分）を伴うので、目標が先に決まっていれば試行回数が減る。#40 はその再抽出に相乗りさせる。#41 はトピックの集合を**消費する側**なので、#39 で455トピックが入れ替わると作り直しになる。
 
@@ -740,7 +741,7 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **今は広げない（2026-10-01）**。共起のまとまりは見えたが、需要と供給の突き合わせは判断に使えなかった。再開の条件は `docs/decisions.md` |
 
-**作業中: `feature/supply-demand-matching`**（#42 の突き合わせの記録）。PR のレビュー待ち。
+**PR #52 マージ済み**（#42 の突き合わせの記録）。**次は上の1（64本で週次時系列を引き直す）**。
 
 ### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
