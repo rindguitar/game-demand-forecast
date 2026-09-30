@@ -92,7 +92,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_tag_semantics.py` | `src/nlp/tag_semantics.py` | タグとの意味の照合・判定ファイル（`configs/steam_tags.txt`）の読み込み・判定の無いタグや二重の判定があれば止まること |
 | `test_topic_bundle.py` | `src/nlp/topic_bundle.py` | タグ語彙の生成・束ね先の決定・「その他」への集約 |
 | `test_topic_granularity.py` | `src/nlp/topic_granularity.py` | マージ木の入れ子性・束のキーワード・束内のばらつき |
-| `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
+| `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | 束ねたかの判定・束ねないとき公式の分類がそのまま単位に付くこと（束ねた単位・分類に無いトピックがあれば止まること）・リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・部分週の除外・シェアとポジ率の算出・パネルの密度と集中度 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
 | `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
