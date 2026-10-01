@@ -2,14 +2,21 @@
 仕分け済みのトピックから、週次の時系列データを作る（Phase 6）
 
 パネルは2つ作る（docs/decisions.md 2026-09-05）:
-  土台13本 … 参加ゲームが入れ替わらないので、絶対数で引ける
-  全24本   … 参加ゲームが入れ替わるので、シェアで見る
+  土台パネル     … 参加ゲームが入れ替わらないので、絶対数で引ける
+  全ゲームパネル … 参加ゲームが入れ替わるので、シェアで見る
+
+期間は、全ゲームの収集がそろう範囲を収集ログから出す。土台は、tier が土台で、かつ
+発売が期間開始の --min-weeks-since-release 週以上前のゲームに限る（docs/decisions.md
+2026-10-01）。どちらも src/timeseries/weekly.py の decide_window_and_backbone を通す
+（分類・粒度比較と同じ定義）。
+24本のときは「全24本・土台13本」だったが、本数は台帳と収集ログから決まる。
 
 処理の流れ:
   1. 仕分け結果から、パネルごとに乗せる単位（トピック）を選ぶ
-  2. レビューに週の列を足し、端の部分週を落とす
-  3. 単位 × 週で 件数・シェア・ポジ率・参加ゲーム数 を集計する
-  4. 系列の健全性（0件週・欠測・振れ幅）を点検して表示する
+  2. 収集ログから共通の期間を出し、土台のゲームを選ぶ
+  3. レビューに週の列を足し、共通の期間に絞る
+  4. 単位 × 週で 件数・シェア・ポジ率・参加ゲーム数 を集計する
+  5. 系列の健全性（0件週・欠測・振れ幅）を点検して表示する
 
 使い方:
     docker compose exec dev python scripts/timeseries/build_weekly_series.py
@@ -25,9 +32,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.nlp.topic_category import MEANINGFUL_CATEGORIES  # noqa: E402
 from src.timeseries.weekly import (  # noqa: E402
+    MIN_WEEKS_SINCE_RELEASE,
     add_week_column,
     build_weekly_series,
-    trim_partial_weeks,
+    decide_window_and_backbone,
+    describe_window_and_backbone,
+    trim_to_window,
 )
 
 
@@ -39,13 +49,17 @@ def parse_args():
     parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv',
                         help='トピック付与済みレビューCSV')
     parser.add_argument('--games', default='data/timeseries/games.csv',
-                        help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列から取る')
+                        help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列と発売日から取る')
+    parser.add_argument('--collection-log', default='data/timeseries/collection_log.csv',
+                        help='収集ログCSV。全ゲームの収集がそろう期間を oldest / newest から出す')
     parser.add_argument('--output-dir', default='data/timeseries',
                         help='出力先ディレクトリ')
     parser.add_argument('--backbone-tier', default='土台',
                         help='土台パネルとして扱う tier の値')
+    parser.add_argument('--min-weeks-since-release', type=int, default=MIN_WEEKS_SINCE_RELEASE,
+                        help='土台に入れる条件。発売が期間開始のこの週数以上前であること（既定 %(default)s）')
     parser.add_argument('--exclude-game', action='append', default=None,
-                        help='土台パネルから外すゲーム名（複数指定可）')
+                        help='土台パネルから手で外すゲーム名（複数指定可。既定は外さない）')
     parser.add_argument('--min-reviews-for-rate', type=int, default=5,
                         help='ポジ率を出す最小件数。これ未満の週は欠測にする')
     return parser.parse_args()
@@ -81,34 +95,35 @@ def report(name, series, categories):
 
 def main():
     args = parse_args()
-    exclude = args.exclude_game if args.exclude_game is not None else ['Starfield']
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # 1. 乗せる単位を選ぶ（①②③以外は乗せない）
     categories = pd.read_csv(args.categories_csv).set_index('topic_id')
     on_series = categories[categories['category'].isin(MEANINGFUL_CATEGORIES)]
-    games = pd.read_csv(args.games)
-    backbone = [g for g in games.loc[games['tier'] == args.backbone_tier, 'name']
-                if g not in exclude]
 
-    # 2. 週の列を足して端の部分週を落とす
+    # 2. 共通の期間と土台のゲームを、収集ログと台帳から機械的に決める
+    window, backbone, left_out = decide_window_and_backbone(
+        pd.read_csv(args.games), pd.read_csv(args.collection_log),
+        tier=args.backbone_tier, min_weeks=args.min_weeks_since_release,
+        exclude=args.exclude_game)
+    print(describe_window_and_backbone(window, backbone, left_out,
+                                       args.backbone_tier, args.min_weeks_since_release))
+
+    # 3. 週の列を足して、共通の期間に絞る
     reviews = pd.read_csv(args.reviews, usecols=['game_name', 'timestamp_created',
                                                  'topic_id', 'voted_up'])
     reviews = add_week_column(reviews)
-    before = reviews['week'].nunique()
-    reviews = trim_partial_weeks(reviews)
-    dropped = before - reviews['week'].nunique()
-    print(f"レビュー {len(reviews):,}件 / {reviews['week'].nunique()}週"
-          f"（端の部分週を{dropped}週ぶん落とした）")
-    print(f"土台パネル: {len(backbone)}本（tier={args.backbone_tier} から"
-          f" {', '.join(exclude)} を除く）")
+    in_window = trim_to_window(reviews, window)
+    print(f"レビュー {len(in_window):,}件 / {in_window['week'].nunique()}週"
+          f"（期間の外の{len(reviews) - len(in_window):,}件を除いた）")
 
-    assigned = reviews[reviews['topic_id'] != -1]
+    assigned = in_window[in_window['topic_id'] != -1]
 
-    # 3. パネルごとに集計する
+    # 4. パネルごとに集計する
     panels = {
-        'all24': (assigned, on_series[on_series['reaches_all']]),
-        'backbone13': (assigned[assigned['game_name'].isin(backbone)],
-                       on_series[on_series['reaches_backbone']]),
+        'all': (assigned, on_series[on_series['reaches_all']]),
+        'backbone': (assigned[assigned['game_name'].isin(backbone)],
+                     on_series[on_series['reaches_backbone']]),
     }
     for name, (data, units) in panels.items():
         subset = data[data['topic_id'].isin(units.index)]
@@ -120,7 +135,9 @@ def main():
         series['category'] = series['unit'].map(categories['category'])
         series['keywords'] = series['unit'].map(categories['keywords'])
 
-        label = '全24本パネル（シェア主軸）' if name == 'all24' else '土台13本パネル（絶対数）'
+        n_games = data['game_name'].nunique()
+        label = (f'全{n_games}本パネル（シェア主軸）' if name == 'all'
+                 else f'土台{n_games}本パネル（絶対数）')
         report(f"{label} — {len(units)}単位", series, categories)
 
         path = os.path.join(args.output_dir, f'weekly_series_{name}.csv')

@@ -153,9 +153,14 @@ Addictive等の「遊んだ結果の感想」は①にしない）。判定の�
 大きいトピックはそのまま残し、タグに寄らないものは「その他」に集約します（`docs/decisions.md` 2026-08-31）。
 
 `categorize_topics.py` と `bundle_topics.py` は上図のほかに `data/timeseries/games.csv` も読みます
-（前者は土台パネルの顔ぶれを `tier` 列から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
-`categorize_topics.py` はさらに `data/timeseries/pool_cache.json`（①の語彙にするSteamタグ）と、
+（前者は土台パネルの顔ぶれを `tier` 列と発売日から、後者は束ね先の語彙をジャンル列・タグ列から取るため）。
+`categorize_topics.py` はさらに `data/timeseries/collection_log.csv`（全ゲームの収集がそろう期間を出すため。
+→ 下の「timeseries/」の節）、`data/timeseries/pool_cache.json`（①の語彙にするSteamタグ）と、
 その判定ファイル `configs/steam_tags.txt`（既定値・`element_tags()` が読む）も読みます。
+週あたり件数は、この共通の期間に絞ったレビューで測ります。
+`--collection-log` / `--min-weeks-since-release` / `--exclude-game`（既定は外さない）で変えられます。
+表示する内訳の件数・割合・到達率は、どれもトピック統計の件数（全期間）を出どころにするので、
+割合の合計は100%になります（期間内で数えた件数を分母に混ぜない）。
 
 **粒度を粗くして比べる**（抽出済みのモデルだけで動く・再学習しない）
 
@@ -174,6 +179,8 @@ flowchart LR
 
 上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます
 （各レベルの単位を `classify_with_evidence()` で仕分けるため）。
+さらに `games.csv` と `collection_log.csv` から、共通の期間と土台のゲームを決めます
+（`categorize_topics.py` と同じ定義・同じ引数）。密度と混入率は、この期間に絞ったレビューで測ります。
 複数のレベルを仕分けるので、埋め込みモデルは1回だけ読んで使い回します。
 
 細かい側（トピックを増やす方向）はこの方法では作れません。`extract_topics.py` を
@@ -279,16 +286,38 @@ flowchart LR
     O[("topic_categories.csv")] --> S["build_weekly_series.py"]
     W[("reviews_timeseries<br/>_with_topics.csv")] --> S
     G[("games.csv")] --> S
-    S --> A[("weekly_series_all24.csv")]
-    S --> B[("weekly_series_backbone13.csv")]
+    L[("collection_log.csv")] --> S
+    S --> A[("weekly_series_all.csv")]
+    S --> B[("weekly_series_backbone.csv")]
 ```
 
 パネルを2枚作ります（`docs/decisions.md` 2026-09-05）。
 
 | パネル | 顔ぶれ | 使い方 |
 |---|---|---|
-| `backbone13` | 期間中に発売が無い13本 | **絶対数**で引ける。主軸 |
-| `all24` | 全24本 | 参加ゲームが入れ替わるので**シェア**で見る |
+| `backbone` | tier が土台で、発売が期間開始の26週以上前のゲーム | **絶対数**で引ける。主軸 |
+| `all` | 全ゲーム | 参加ゲームが入れ替わるので**シェア**で見る |
+
+本数は台帳と収集ログから決まります（24本のときは土台13本・全24本、64本では土台36本・全64本）。
+出力は `weekly_series_backbone.csv` / `weekly_series_all.csv` です（`plot_weekly_series.py` も同じ名前を読みます）。
+
+**期間と土台は、収集ログと台帳から機械的に決めます**（日付・本数は手で書かない。→ `docs/decisions.md` 2026-10-01）。
+`build_weekly_series.py` / `categorize_topics.py` / `compare_topic_granularity.py` の3本が、
+`src/timeseries/weekly.py` の **`decide_window_and_backbone()` 1つ**を呼んで決めます
+（台帳と収集ログを渡すと `(期間, 土台, 外れたゲーム)` が返り、画面の表示文も
+`describe_window_and_backbone()` で3本とも同じになります）。中身は次の2つです。
+
+- **期間** = `common_window()`。tier が土台のゲームの収集ログ（`collection_log.csv` の oldest / newest）から、
+  全ゲームの収集がそろう範囲を出す。最も遅い oldest と最も早い newest を含む週は、途中までしか
+  集めていないので使わない（64本では 2023-09-25〜2026-08-24 の153週）
+- **土台** = `select_backbone()`。tier が土台で、発売が期間開始の26週以上前のゲーム
+  （`--min-weeks-since-release`・既定は `MIN_WEEKS_SINCE_RELEASE`）。発売日が読めなければ止まる。
+  Starfield を手書きで外すのはやめた（期間開始の3週前の発売なので、この規則で外れる）。
+  手で外したいときだけ `--exclude-game`（既定は外さない）
+
+3本とも、この期間のレビューだけで測ります（物差しを1本にするため）。密度を測る
+`measure_topic_panels()` は期間を省略できず、`build_weekly_series.py` は `trim_to_window()` で絞ります。
+`--collection-log`（既定 `data/timeseries/collection_log.csv`）と `--min-weeks-since-release` も3本とも同じです。
 
 出力は縦長で、1行が「単位 × 週」です。列は `count`（言及数）/ `share`（その週の総言及数に対する割合）/
 `positive_rate`（ポジ率）/ `expected_positive_rate`（ゲーム構成から期待されるポジ率）/
