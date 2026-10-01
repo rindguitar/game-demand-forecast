@@ -37,7 +37,14 @@ from src.nlp.topic_granularity import (  # noqa: E402
     CTFIDF, EMBEDDING, build_linkage, cut_levels, group_dispersion,
     merged_keywords, topic_matrix,
 )
-from src.timeseries.weekly import measure_topic_panels  # noqa: E402
+from src.timeseries.weekly import (  # noqa: E402
+    MIN_WEEKS_SINCE_RELEASE,
+    add_week_column,
+    decide_window_and_backbone,
+    describe_window_and_backbone,
+    measure_topic_panels,
+    trim_to_window,
+)
 
 # 束に紛れ込むと需要スコアを水増しする分類
 NOISE = (CONTENTLESS, PROPERNOUN)
@@ -49,7 +56,10 @@ def parse_args():
     parser.add_argument('--model', default='models/topic_full')
     parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv')
     parser.add_argument('--stats', default='data/timeseries/topic_statistics.csv')
-    parser.add_argument('--games', default='data/timeseries/games.csv')
+    parser.add_argument('--games', default='data/timeseries/games.csv',
+                        help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列と発売日から取る')
+    parser.add_argument('--collection-log', default='data/timeseries/collection_log.csv',
+                        help='収集ログCSV。全ゲームの収集がそろう期間を oldest / newest から出す')
     parser.add_argument('--categories', default='configs/topic_categories.txt')
     parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
                         help='①の語彙にするSteamタグの取得元（必須。証拠なしで分類しないため）')
@@ -62,8 +72,12 @@ def parse_args():
                         help='時系列に乗せる下限（週あたり件数の中央値）')
     parser.add_argument('--cross-max', type=float, default=0.5,
                         help='横断とみなす上限（top1_share がこれ未満なら横断）')
-    parser.add_argument('--backbone-tier', default='土台')
-    parser.add_argument('--exclude-game', action='append', default=None)
+    parser.add_argument('--backbone-tier', default='土台',
+                        help='土台パネルとして扱う tier の値')
+    parser.add_argument('--min-weeks-since-release', type=int, default=MIN_WEEKS_SINCE_RELEASE,
+                        help='土台に入れる条件。発売が期間開始のこの週数以上前であること（既定 %(default)s）')
+    parser.add_argument('--exclude-game', action='append', default=None,
+                        help='土台パネルから手で外すゲーム名（複数指定可。既定は外さない）')
     return parser.parse_args()
 
 
@@ -76,20 +90,20 @@ def original_categories(stats_path, category_words, tags, encoder):
     return {int(c.topic_id): c.category for c in classified}
 
 
-def measure_level(df, backbone, mapping, model, weights, category_words,
+def measure_level(df, backbone, window, mapping, model, weights, category_words,
                   origin_category, tags, encoder, args):
     """1つの粒度レベルを測って、単位ごとの表と要約の dict を返す
 
     処理の流れ:
       1. 各レビューの topic_id を束IDに置き換える（Outlier は Outlier のまま）
-      2. 束ごとの密度・集中度をパネル共通の物差しで測る
+      2. 束ごとの密度・集中度をパネル共通の物差しで測る（df は期間に絞ってある。window は物差しの必須の引数）
       3. 束のキーワードを作って分類する（tags・encoder は呼び出し側で1回だけ読んだものを使い回す）
       4. 到達 / 横断 / 意味ありの3条件で有効単位を数え、混入率を出す
     """
     work = df.copy()
     work['unit'] = work['topic_id'].map(mapping).fillna(-1).astype(int)
 
-    panels, totals = measure_topic_panels(work, backbone, unit_column='unit')
+    panels, totals = measure_topic_panels(work, backbone, window, unit_column='unit')
     keywords = merged_keywords(model, mapping, weights)
 
     units = panels.reset_index().rename(columns={'index': 'unit', 'unit': 'unit'})
@@ -137,24 +151,32 @@ def measure_level(df, backbone, mapping, model, weights, category_words,
 
 def main():
     args = parse_args()
-    exclude = args.exclude_game if args.exclude_game is not None else ['Starfield']
     levels = [int(x) for x in args.levels.split(',')]
     os.makedirs(args.outdir, exist_ok=True)
 
-    # 1. 材料を読む
+    # 1. 材料を読む。共通の期間と土台のゲームは、収集ログと台帳から機械的に決める。
+    #    レビューは先に期間へ絞る（密度と混入率を同じレビューで測るため）。
+    #    束の重み（トピックごとの件数）は期間と関係ないので、全レビューから数える
     from bertopic import BERTopic
     print(f"モデルを読む: {args.model}")
     model = BERTopic.load(args.model)
+    window, backbone, left_out = decide_window_and_backbone(
+        pd.read_csv(args.games), pd.read_csv(args.collection_log),
+        tier=args.backbone_tier, min_weeks=args.min_weeks_since_release,
+        exclude=args.exclude_game)
+    print(describe_window_and_backbone(window, backbone, left_out,
+                                       args.backbone_tier, args.min_weeks_since_release))
+
     df = pd.read_csv(args.reviews, usecols=['game_name', 'timestamp_created', 'topic_id'])
-    games = pd.read_csv(args.games)
-    backbone = [g for g in games.loc[games['tier'] == args.backbone_tier, 'name'].tolist()
-                if g not in exclude]
+    weights = df['topic_id'].value_counts().to_dict()
+    total = len(df)
+    df = trim_to_window(add_week_column(df), window)
     category_words = load_category_words(args.categories)
     tags = element_tags(load_pool(args.pool))
     encoder = load_encoder()
     origin_category = original_categories(args.stats, category_words, tags, encoder)
-    weights = df['topic_id'].value_counts().to_dict()
-    print(f"レビュー {len(df):,}件 / 土台 {len(backbone)}本 / 距離 {args.distance}")
+    print(f"レビュー {len(df):,}件（期間の外の{total - len(df):,}件を除いた）"
+          f" / 距離 {args.distance}")
 
     # 2. マージ木を作り、レベルごとに切る
     matrix, topic_ids = topic_matrix(model, args.distance)
@@ -165,7 +187,7 @@ def main():
     # 3. レベルごとに同じ物差しで測る
     rows = []
     for level in levels:
-        units, summary = measure_level(df, backbone, mappings[level], model, weights,
+        units, summary = measure_level(df, backbone, window, mappings[level], model, weights,
                                        category_words, origin_category, tags, encoder, args)
         summary['level'] = level
         rows.append(summary)

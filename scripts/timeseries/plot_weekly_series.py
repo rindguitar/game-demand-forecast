@@ -2,7 +2,7 @@
 週次時系列を折れ線グラフにする
 
 build_weekly_series.py が出したCSVを読んで、パネルごとに図を描く。
-土台13本は絶対数（言及数）、全24本はシェアが主軸になる
+土台パネルは絶対数（言及数）、全ゲームパネルはシェアが主軸になる
 （docs/decisions.md 2026-09-05 / 2026-08-31）。
 
 使い方:
@@ -23,10 +23,11 @@ from src.visualization.timeseries_plots import (  # noqa: E402
     plot_series_grid,
 )
 
-# パネルごとの主軸（土台13本は絶対数で引ける／全24本は参加ゲームが入れ替わるのでシェア）
+# パネルごとの主軸（土台は絶対数で引ける／全ゲームは参加ゲームが入れ替わるのでシェア）。
+# キーは build_weekly_series.py が出す weekly_series_<キー>.csv のキーと同じ
 PANELS = {
-    'backbone13': ('count', 'Backbone 13 games - weekly mentions'),
-    'all24': ('share', 'All 24 games - share of weekly mentions'),
+    'backbone': ('count', 'Backbone games - weekly mentions'),
+    'all': ('share', 'All games - share of weekly mentions'),
 }
 
 

@@ -7,7 +7,8 @@ docs/decisions.md 2026-08-18「トピックを3分類し、仕分けは ルー�
 処理の流れ:
   1. トピック統計（topic_statistics.csv）を読む
   2. 分類語彙（configs/topic_categories.txt）で各トピックを仕分ける
-  3. レビュー本体から、パネルごとの週あたり件数（中央値）とゲーム集中度を測る
+  3. 収集ログから共通の期間と土台のゲームを決め、期間に絞ったレビュー本体から、
+     パネルごとの週あたり件数（中央値）とゲーム集中度を測る
   4. 分類 × パネル到達 の内訳を表示し、CSVに書き出す
 
 使い方:
@@ -23,7 +24,12 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from src.timeseries.weekly import measure_topic_panels  # noqa: E402
+from src.timeseries.weekly import (  # noqa: E402
+    MIN_WEEKS_SINCE_RELEASE,
+    decide_window_and_backbone,
+    describe_window_and_backbone,
+    measure_topic_panels,
+)
 from src.data.pool_tags import load_pool  # noqa: E402
 from src.nlp.tag_semantics import element_tags  # noqa: E402
 from src.nlp.topic_category import (  # noqa: E402
@@ -53,7 +59,9 @@ def parse_args():
     parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv',
                         help='トピック付与済みレビューCSV。週あたり件数と集中度の測定に使う')
     parser.add_argument('--games', default='data/timeseries/games.csv',
-                        help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列から取る')
+                        help='ゲーム台帳CSV。土台パネルの顔ぶれを tier 列と発売日から取る')
+    parser.add_argument('--collection-log', default='data/timeseries/collection_log.csv',
+                        help='収集ログCSV。全ゲームの収集がそろう期間を oldest / newest から出す')
     parser.add_argument('--categories', default='configs/topic_categories.txt',
                         help='分類語彙のファイル')
     parser.add_argument('--pool', default='data/timeseries/pool_cache.json',
@@ -68,36 +76,34 @@ def parse_args():
                         help='時系列に乗せる下限（週あたり件数の中央値）')
     parser.add_argument('--backbone-tier', default='土台',
                         help='土台パネルとして扱う tier の値')
+    parser.add_argument('--min-weeks-since-release', type=int, default=MIN_WEEKS_SINCE_RELEASE,
+                        help='土台に入れる条件。発売が期間開始のこの週数以上前であること（既定 %(default)s）')
     parser.add_argument('--exclude-game', action='append', default=None,
-                        help='土台パネルから外すゲーム名（複数指定可）')
+                        help='土台パネルから手で外すゲーム名（複数指定可。既定は外さない）')
     parser.add_argument('--show', choices=CATEGORY_ORDER, default=None,
                         help='この分類のトピックを全件表示する（既定は要約のみ）')
     return parser.parse_args()
 
 
-def measure_panels(reviews_path, games_path, backbone_tier, exclude_games):
-    """レビューCSVと台帳を読み、パネルごとの週あたり件数とゲーム集中度を測る
+def measure_panels(reviews_path, backbone, window):
+    """レビューCSVを読み、共通の期間で、パネルごとの週あたり件数とゲーム集中度を測る
 
     物差しの本体は src/timeseries/weekly.py に置く（粒度比較スクリプトと共有するため）。
-    ここは入力ファイルを読んで土台パネルの顔ぶれを決めるだけ。
+    ここは入力ファイルを読むだけ。
     """
     df = pd.read_csv(reviews_path, usecols=['game_name', 'timestamp_created', 'topic_id'])
-    games = pd.read_csv(games_path)
-    backbone = games.loc[games['tier'] == backbone_tier, 'name'].tolist()
-    backbone = [g for g in backbone if g not in (exclude_games or [])]
 
-    panels, totals = measure_topic_panels(df, backbone)
-    totals['backbone_games'] = backbone
+    panels, totals = measure_topic_panels(df, backbone, window)
     totals['all_games'] = df['game_name'].nunique()
     return panels, totals
 
 
 def main():
     args = parse_args()
-    exclude = args.exclude_game if args.exclude_game is not None else ['Starfield']
 
-    # 1. トピック統計を読む（Outlier行は分類しない）
+    # 1. トピック統計を読む（Outlier行は分類しない。件数だけ、到達率の分母に使うので控える）
     stats = pd.read_csv(args.stats)
+    outlier_count = int(stats.loc[stats['topic_id'] == -1, 'count'].sum())
     stats = stats[stats['topic_id'] != -1].copy()
     print(f"トピック統計: {len(stats)}件（{args.stats}）")
 
@@ -119,15 +125,24 @@ def main():
     stats['tag_score'] = [c.tag_score for c in classified]
     stats['tag_best'] = [c.tag for c in classified]
 
-    # 3. パネルごとの密度・集中度を測る
-    panels, totals = measure_panels(args.reviews, args.games, args.backbone_tier, exclude)
+    # 3. 共通の期間と土台のゲームを、収集ログと台帳から機械的に決める
+    window, backbone, left_out = decide_window_and_backbone(
+        pd.read_csv(args.games), pd.read_csv(args.collection_log),
+        tier=args.backbone_tier, min_weeks=args.min_weeks_since_release,
+        exclude=args.exclude_game)
+    print(describe_window_and_backbone(window, backbone, left_out,
+                                       args.backbone_tier, args.min_weeks_since_release))
+
+    # 3b. 共通の期間で、パネルごとの密度・集中度を測る
+    panels, totals = measure_panels(args.reviews, backbone, window)
     stats = stats.merge(panels, left_on='topic_id', right_index=True, how='left')
     stats['reaches_all'] = stats['per_week_all'] >= args.min_per_week
     stats['reaches_backbone'] = stats['per_week_backbone'] >= args.min_per_week
-    print(f"土台パネル: {len(totals['backbone_games'])}本"
-          f"（tier={args.backbone_tier} から {', '.join(exclude)} を除く）")
 
-    # 4. 内訳を出す
+    # 4. 内訳を出す。件数・割合・到達率は、どれもトピック統計（stats の count）を出どころに
+    #    する。期間内で数えた件数を分母にすると、割合の合計が100%にならない
+    assigned_count = stats['count'].sum()
+    all_count = assigned_count + outlier_count
     print(f"\n{'=' * 78}\n分類の内訳（全{len(stats)}トピック）\n{'=' * 78}")
     header = f"{'分類':<14}{'個数':>6}{'件数':>12}{'割合':>8}   週{args.min_per_week:g}件以上"
     print(header)
@@ -138,16 +153,16 @@ def main():
             continue
         reach = sub[sub['reaches_all']]
         print(f"{CATEGORY_LABELS[category]:<14}{len(sub):>6}{sub['count'].sum():>12,}"
-              f"{sub['count'].sum() / totals['assigned']:>8.1%}   "
+              f"{sub['count'].sum() / assigned_count:>8.1%}   "
               f"{len(reach):>3}個 / {reach['count'].sum():>9,}件")
 
     reach_all = stats[stats['reaches_all']]
     print('-' * 78)
     print(f"合計{'':<10}{len(stats):>6}{stats['count'].sum():>12,}{1.0:>8.1%}   "
           f"{len(reach_all):>3}個 / {reach_all['count'].sum():>9,}件")
-    print(f"\n全レビュー {totals['all_reviews']:,}件に対する到達率: "
-          f"{reach_all['count'].sum() / totals['all_reviews']:.1%}"
-          f"（Outlier {1 - totals['assigned'] / totals['all_reviews']:.1%} を含む母数）")
+    print(f"\n全レビュー {all_count:,}件に対する到達率: "
+          f"{reach_all['count'].sum() / all_count:.1%}"
+          f"（Outlier {outlier_count / all_count:.1%} を含む母数）")
 
     element_reach = reach_all[reach_all['category'] == ELEMENT]
     bb_reach = stats[stats['reaches_backbone']]

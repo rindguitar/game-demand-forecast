@@ -225,7 +225,7 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。�
 
 | ファイル | 説明 |
 |---|---|
-| `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・期待ポジ率・参加ゲーム数） |
+| `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・期待ポジ率・参加ゲーム数）。共通の期間と土台のゲームの決め方（3本のスクリプトの入口）もここに置く |
 
 充足度は**実際のポジ率とあわせて「期待ポジ率」も出します**。`voted_up` はゲーム全体への評価なので、
 トピックの絶対値だとそのゲームの評判を読んでしまうためです（→ `docs/decisions.md` 2026-09-07）。
@@ -235,14 +235,32 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。�
 
 **主要関数（weekly.py）:**
 - `add_week_column(df)` — UNIX秒からその週の月曜を指す列を足す
-- `trim_partial_weeks(df)` — 端の部分週を落とす（7日そろっていない週は件数が落ちて誤読される）
+- `common_window(log, names)` — 全ゲームの収集がそろう期間 `(最初の週の月曜, 最後の週の月曜)` を、
+  収集ログの oldest / newest から出す。最も遅い oldest と最も早い newest を含む週は、
+  途中までしか集めていないので使わない。対象がログに無い・日付が空なら止まる
+  （ロスターを2回に分けて集めると収集の端が約2週ずれ、「集めていないので0件」の偽の谷ができるため）
+- `trim_to_window(df, window)` — 期間に入る週のレビューだけを残す
+- `select_backbone(games, window_start, ...)` — 土台に入れるゲームを選ぶ。tier が一致し、
+  発売が期間開始の `MIN_WEEKS_SINCE_RELEASE` 週以上前（発売直後の減りを入れないため）。
+  発売日が読めないゲームがあれば止まる。手で外したいときだけ `exclude`（既定は外さない）
+- `decide_window_and_backbone(games, log, tier, min_weeks, exclude)` — **3本のスクリプトの入口**。
+  台帳の tier が一致するゲームの収集ログから `common_window` で期間を出し、その開始から
+  `select_backbone` で土台を選んで、`(期間, 土台, 外れたゲーム)` を返す
+- `describe_window_and_backbone(window, backbone, left_out, tier, min_weeks)` — 上の結果を
+  画面に出す3行の文にする（3本で同じ表示になる）
 - `build_weekly_series(df, ...)` — 単位 × 週の表を作る。週の軸は連続した週で埋め、
   各単位の初出より前は欠測にする（需要ゼロではなく観測対象外のため）
 - `weekly_median(df, week_axis, unit_column)` — 単位ごとの週あたり件数の中央値。
   平均だと発売スパイク型が密度十分に見える（→ `docs/decisions.md` 2026-09-07）
-- `measure_topic_panels(df, backbone_games, unit_column)` — パネルごとの密度とゲーム集中度。
+- `measure_topic_panels(df, backbone_games, window, unit_column)` — パネルごとの密度とゲーム集中度。
   `scripts/nlp/categorize_topics.py` と `scripts/nlp/compare_topic_granularity.py` の
-  **両方がこれを呼ぶ**。粒度を変えて比べるとき、物差しが1つでないと比較が成り立たないため
+  **両方がこれを呼ぶ**。粒度を変えて比べるとき、物差しが1つでないと比較が成り立たないため。
+  **期間（`window`）は省略できない**。中で期間に絞ってから測り、週の軸も期間そのものになる
+  （省略できると、収集の端の週が混ざる古いやり方へ黙って戻るため。`docs/decisions.md` 2026-09-27 と同じ考え方）
+
+期間と土台は、**`build_weekly_series.py` / `categorize_topics.py` /
+`compare_topic_granularity.py` の3本が `decide_window_and_backbone` 1つを呼んで決めます**
+（定義が3か所に分かれないようにするため。→ `docs/decisions.md` 2026-10-01）。
 
 ---
 
