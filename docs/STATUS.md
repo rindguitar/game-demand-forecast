@@ -742,10 +742,17 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 ## 次の一手（優先順）
 
 1. **#41 Prophet で週次トピック需要を予測する（Phase 7）**。64本の週次時系列（`data/timeseries/weekly_64/`）を入力にする。
-   始める前に決めること:
-   - **どちらのパネルを予測するか**。土台（絶対数）は毎年11月末に Steam 全体の波が乗る。全体（シェア）は新作の発売で顔ぶれが揺れる
-   - **Steam 全体の波（11月末のセール・アワード）を、季節性として学ばせるか、出来事として別に渡すか**
-   - 4年周期の出来事（W杯）は3年の期間では1回しか見えない
+   - ⚠️ **最初の準備: Prophet がコンテナに入っていない**（`requirements.txt` の `# - prophet` がコメントアウトのまま。
+     2026-10-01 に `import prophet` が失敗することを確認）。作業ブランチで requirements を有効にし、
+     **Docker イメージの再ビルドをユーザーにお願いする**（再ビルドはユーザー作業・CLAUDE.md）
+   - 入力: `weekly_series_backbone.csv`（土台36本・`count` 列＝絶対数）と `weekly_series_all.csv`（全64本・`share` 列＝シェア）。
+     どちらも 29 / 59単位 × 153週、列は unit / week / count / games / share / positive_rate / category / keywords など
+   - 始める前に決めること:
+     - **どちらのパネルを予測するか**。土台（絶対数）は毎年11月末に Steam 全体の波が乗る。全体（シェア）は新作の発売で顔ぶれが揺れる
+     - **Steam 全体の波（11月末のセール・アワード）を、季節性として学ばせるか、出来事として別に渡すか**
+     - 4年周期の出来事（W杯）は3年の期間では1回しか見えない
+   - 関係する過去の判断: 2026-08-31「Y軸はシェア主軸＋総言及数を補助線」／2026-09-07「季節性は絶対数で見る
+     （シェアだと全体が同時に上がる季節性が打ち消される）」／2026-08-18「成果物は株価チャート型」
 2. **#38（小さいトピックの束ね方）はおそらく不要**。言及量が足りない問題が自然解消した
    （週10件以上 35個 → 118個）。クローズしてよいか要判断
 3. **#39（Outlier）は残る**。43.9% → 41.9% と微減しただけ
@@ -764,7 +771,8 @@ Wikiに2ページ追加（[Silent Truncation](https://github.com/rindguitar/game
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を自動検出＋人の採否に | `wotc`（23本にまたがる）が最優先 |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | **需要スコアを「部品の合算」から「組み合わせ」へ広げるか** | **今は広げない（2026-10-01）**。共起のまとまりは見えたが、需要と供給の突き合わせは判断に使えなかった。再開の条件は `docs/decisions.md` |
 
-**作業中: `feature/weekly-64`**（64本の週次時系列・土台の26週の規則・共通の期間）。PR のレビュー待ち。
+**PR #53 マージ済み**（64本の週次時系列・土台の26週の規則・共通の期間）。**次は上の1（#41 Prophet）**。
+`main` から新しいブランチを切って始める。最初に Prophet の導入（イメージの再ビルドはユーザー作業）が要る。
 
 ### 到達率が32.1%で頭打ちになっている件（→ [#39](https://github.com/rindguitar/game-demand-forecast/issues/39)）
 
@@ -801,6 +809,28 @@ docker compose exec dev python scripts/nlp/bundle_topics.py --show
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
 docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 ```
+
+**64本（いまの本番）で回すとき**。スクリプトの既定値は24本版のファイルを指しているので、64本は引数で渡す。
+`categorize_topics.py` は **`--output` を必ず付ける**（省くと24本版の `topic_categories.csv` を上書きする）。
+
+```bash
+docker compose exec dev python scripts/nlp/categorize_topics.py \
+    --stats data/timeseries/topic_statistics_64.csv \
+    --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --output data/timeseries/topic_categories_64.csv
+docker compose exec dev python scripts/timeseries/build_weekly_series.py \
+    --categories-csv data/timeseries/topic_categories_64.csv \
+    --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --output-dir data/timeseries/weekly_64
+docker compose exec dev python scripts/timeseries/plot_weekly_series.py \
+    --input-dir data/timeseries/weekly_64 --output-dir data/timeseries/weekly_64/plots
+docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \
+    --model models/topic_64 --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --level 526 --categories-csv data/timeseries/topic_categories_64.csv \
+    --outdir data/timeseries/cooccurrence_64
+```
+
+期間（全ゲームの収集がそろう範囲）と土台（発売が期間開始の26週以上前）は、3本とも `collection_log.csv` と `games.csv` から自動で決まる。
 
 ### 未実施のまま残っている測定
 
