@@ -88,6 +88,18 @@ make collect-timeseries COLLECT_ARGS="--extend --n-games 79 --max-per-genre 40 -
 
 ⚠️ `--reselect` は顔ぶれを選び直すので、収集済みのゲームが入れ替わります。足すときは `--extend` を使ってください。
 
+条件を変えて顔ぶれだけ見るときは `--dry-run` を付けます（APIを叩かないので数秒・台帳は変わりません）。
+
+```bash
+docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
+    --dry-run --reselect --max-backbone 12
+```
+
+⚠️ **消してはいけないファイルが2つあります。**
+
+- `data/timeseries/reviews_timeseries.csv` — **唯一の再現不能な資産**。レビュー本文があるので、トピックの作り方を変えても遡って作り直せる
+- `data/timeseries/pool_cache.json` — 母集団497本のメタ情報。消すと選定に15〜20分かかる
+
 **使用方法:**
 ```bash
 make collect-10k           # 10000件（学習用）
@@ -273,6 +285,18 @@ make extract-topics        # トピック抽出
 make compare-granularity   # 粒度レベルの比較（再学習しない）
 ```
 
+`make extract-topics` は既定値で回します。本番の設定は次のとおりです。
+出力は既定で上書きされる（`reviews_timeseries_with_topics.csv` / `topic_statistics.csv`）ので、残したいときは
+`--output` / `--stats-output` / `--model-output` を別名にします（64本の本番は `_64` 付きの名前・`models/topic_64`）。
+
+```bash
+docker compose exec dev python scripts/nlp/extract_topics.py \
+    --input data/timeseries/reviews_timeseries.csv \
+    --sample-per-game 5000 --fit-sample-size 100000 \
+    --skip-english-filter --remove-all-game-names \
+    --model-output models/topic_full
+```
+
 `train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。
 
 ---
@@ -336,6 +360,25 @@ flowchart LR
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
 docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 ```
+
+**64本（いまの本番）で回すとき**。スクリプトの既定値は24本版のファイルを指しているので、64本は引数で渡します
+（既定値を直す件は Issue #56）。⚠️ `categorize_topics.py` は **`--output` を必ず付けてください**。
+省くと24本版の `topic_categories.csv` を上書きします。
+
+```bash
+docker compose exec dev python scripts/nlp/categorize_topics.py \
+    --stats data/timeseries/topic_statistics_64.csv \
+    --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --output data/timeseries/topic_categories_64.csv
+docker compose exec dev python scripts/timeseries/build_weekly_series.py \
+    --categories-csv data/timeseries/topic_categories_64.csv \
+    --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \
+    --output-dir data/timeseries/weekly_64
+docker compose exec dev python scripts/timeseries/plot_weekly_series.py \
+    --input-dir data/timeseries/weekly_64 --output-dir data/timeseries/weekly_64/plots
+```
+
+期間と土台は、3本とも `collection_log.csv` と `games.csv` から自動で決まります。
 
 図は1枚に線を重ねず、系列ごとに小さい図を並べます（`.claude/rules/mermaid.md` の
 「1枚の線を減らす」と同じ理由）。コンテナに日本語フォントが無いのでラベルは英語です。
