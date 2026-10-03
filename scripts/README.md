@@ -8,7 +8,7 @@
 scripts/
 ├── collect/            # データ収集
 ├── nlp/                # NLP本番実行
-├── timeseries/         # 週次時系列の作成
+├── timeseries/         # 週次時系列の作成と予測
 ├── misclassification/  # 誤分類の分析パイプライン
 ├── evaluation/         # モデル評価・比較・多シード検証
 ├── learning_curve/     # データ量と精度の関係
@@ -301,9 +301,10 @@ docker compose exec dev python scripts/nlp/extract_topics.py \
 
 ---
 
-## timeseries/ — 週次時系列の作成（Phase 6）
+## timeseries/ — 週次時系列の作成と予測（Phase 6〜7）
 
-仕分け済みのトピックから、週次の時系列データを作ります。
+仕分け済みのトピックから、週次の時系列データを作ります（Phase 6）。
+そのシェアを Prophet で予測して、単純な予測と比べます（Phase 7・下の「予測と評価」）。
 
 ```mermaid
 flowchart LR
@@ -354,11 +355,13 @@ flowchart LR
 |---|---|
 | `build_weekly_series.py` | 週次時系列の作成と、系列の健全性の点検 |
 | `plot_weekly_series.py` | 折れ線グラフの作成（`data/timeseries/plots/`） |
+| `forecast_prophet.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合を比べる（`data/timeseries/forecast_64/`）。Issue #41 |
 
 **使用方法:**
 ```bash
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
 docker compose exec dev python scripts/timeseries/plot_weekly_series.py
+make forecast-prophet      # 予測と評価。引数は FORECAST_ARGS で渡す
 ```
 
 **64本（いまの本番）で回すとき**。スクリプトの既定値は24本版のファイルを指しているので、64本は引数で渡します
@@ -382,6 +385,64 @@ docker compose exec dev python scripts/timeseries/plot_weekly_series.py \
 
 図は1枚に線を重ねず、系列ごとに小さい図を並べます（`.claude/rules/mermaid.md` の
 「1枚の線を減らす」と同じ理由）。コンテナに日本語フォントが無いのでラベルは英語です。
+
+### 予測と評価 — forecast_prophet.py（Phase 7）
+
+全64本の中での週次シェア（`weekly_series_all.csv` の `share`）を、トピック（単位）ごとに Prophet で予測し、
+**単純な予測より当たるか**を測ります（Issue #41。シェアを予測する理由は `docs/decisions.md` 2026-10-03）。
+
+```mermaid
+flowchart LR
+    W[("weekly_series_all.csv")] --> F["forecast_prophet.py"]
+    F --> FC[("forecasts.csv<br/>週ごとの実績と予測")]
+    F --> MT[("metrics.csv<br/>単位ごとの当たり具合")]
+    F --> SM[("summary.csv<br/>比較ごとの勝った単位数")]
+    F --> PL[("plots/forecast_*.png<br/>単位ごとの図")]
+```
+
+**評価のしかた**
+
+- **切り方**: 全単位で同じ週で切ります。最後の26週（`--test-weeks`）をテスト、その前（64本では127週）を学習にします。
+  `share` が欠測の行は、学習・テストとも除きます
+- **予測する4つの方法**: Prophet（年次季節性あり）／Prophet（年次季節性なし）／
+  比べる相手①「学習期間の平均」／比べる相手②「直近の平均」（学習期間の最後の4週・`--recent-weeks`）。
+  Prophet は年次季節性の有無だけを変え、ほかは既定値のままです。比べる相手も Prophet と同じ学習期間から作ります
+  （発売の山やセールの週も除きません）
+- **当たり具合**: テスト期間の MAE（予測と実績の差の絶対値の平均）を、4つの方法それぞれで出します
+- **比**: `MAE(Prophet) ÷ MAE(比べる相手)`。**1未満なら Prophet の勝ち**です（ちょうど1や欠測は勝ちにしません）。
+  次の2×2の4通りを、勝った単位数・全単位数・比の中央値にまとめます（`summary.csv`）
+
+| | 比べる相手① 学習期間の平均 | 比べる相手② 直近の平均 |
+|---|---|---|
+| **Prophet（年次季節性あり）** | `ratio_prophet_yearly_vs_baseline_mean` | `ratio_prophet_yearly_vs_baseline_recent` |
+| **Prophet（年次季節性なし）** | `ratio_prophet_no_yearly_vs_baseline_mean` | `ratio_prophet_no_yearly_vs_baseline_recent` |
+
+- Prophet の予測が負になっても**クリップしません**。負になった数だけ画面に出します
+
+**出力**（既定は `data/timeseries/forecast_64/`）
+
+| ファイル | 中身 |
+|---|---|
+| `forecasts.csv` | 縦長。`unit, week, split（train / test）, actual, prophet_yearly, prophet_no_yearly, baseline_mean, baseline_recent`。予測の列はテスト週だけ値が入り、学習週は空 |
+| `metrics.csv` | 1行1単位。`unit, category, keywords`、4つの MAE（`mae_<方法>`）、4つの比（`ratio_<Prophet>_vs_<比べる相手>`） |
+| `summary.csv` | 4通りの比較ごとに、勝った単位数（`wins`）・全単位数（`units`）・比の中央値（`median_ratio`） |
+| `plots/forecast_01.png` ほか | 単位ごとの小さい図を、30単位ずつ並べる。学習期間の最後の52週（`--plot-weeks`）の実績（灰）、テスト期間の実績（黒）、4つの予測、テスト開始の縦線。ラベルは英語。`--no-plot` で省く |
+
+このスクリプトの既定値（`--input`・`--output-dir`）は**64本のファイルを指します**。
+ほかの timeseries スクリプトは24本版を指したままです（Issue #56）。
+
+**Prophet の注意点（学習が終わらないことがある・結果が入力の最後の桁で動く）**:
+Prophet が使う Stan の最適化（L-BFGS）が、ごく稀に終わらなくなります。入力の数値の最後の桁が違うだけで
+起きたり起きなかったりします（実測: 64本・テスト26週で、`share` を pandas の既定の読み方で読むと118回の学習のうち
+1回〔unit 27 の年次季節性なし〕、このスクリプトの読み方〔`float_precision='round_trip'`〕では0回）。
+起きると乱数の種を変えても止まり、何分待っても返りません。
+そこで1回の学習を10秒（`src/timeseries/forecast.py` の `FIT_TIMEOUT_SECONDS`）で打ち切り、
+**その学習だけ** Newton 法（Prophet が学習データ100点未満で既定に使う方法）で学び直して、画面に ⚠️ を出します。
+ほかの学習は Prophet の既定のままです。打ち切るとき cmdstanpy の ERROR 行（`code '-15'`）が1行出ますが、
+異常ではなく打ち切りの印です。
+
+同じ理由で、Prophet の予測は入力の最後の桁の違いでも動きます（実測: 単位ごとの比で最大1割ほど。
+勝敗は変わらず、中央値は0.03以内）。同じ入力なら毎回まったく同じ結果になります。
 
 ---
 

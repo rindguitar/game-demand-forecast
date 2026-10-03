@@ -53,6 +53,7 @@ help:
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
+	@echo "  make forecast-prophet     - Prophetで週次シェアを予測し平均と比べる（Issue #41・数十秒）"
 	@echo ""
 	@echo "【DAPTパイプライン】"
 	@echo "  make collect-ood          - OODテストセット収集（評価用）"
@@ -213,6 +214,11 @@ inspect-timeseries:
 
 # 収集 → 点検を通しで実行。収集が失敗したら点検はしない
 timeseries-dataset: collect-timeseries inspect-timeseries
+
+# 週次シェア（全64本）を Prophet で予測し、学習期間の平均・直近の平均と当たり具合を比べる（Issue #41・数十秒）
+# 引数は FORECAST_ARGS で渡す。例: make forecast-prophet FORECAST_ARGS="--recent-weeks 8 --no-plot"
+forecast-prophet:
+	docker compose exec dev python scripts/timeseries/forecast_prophet.py $(FORECAST_ARGS)
 
 # ============================================================
 # DAPT（ドメイン適応事前学習）パイプライン

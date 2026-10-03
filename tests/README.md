@@ -8,6 +8,7 @@
 tests/
 ├── test_data/      # データ収集・前処理のテスト
 ├── test_nlp/       # NLP処理のテスト
+├── test_timeseries/ # 週次時系列・予測のテスト
 └── test_visualization/ # 可視化のテスト
 ```
 
@@ -40,6 +41,16 @@ flowchart LR
     T9["test_topic_granularity.py"] --> M8["src/nlp/topic_granularity.py"]
     TA["test_topic_cooccurrence.py"] --> M9["src/nlp/topic_cooccurrence.py"]
 ```
+
+**test_timeseries/ — 週次時系列**
+
+```mermaid
+flowchart LR
+    TW["test_weekly.py"] --> W["src/timeseries/weekly.py"]
+    TF["test_forecast.py"] --> F["src/timeseries/forecast.py"]
+```
+
+同じディレクトリの `test_game_selection.py` など3本は、収集スクリプトのテストです（下の表）。
 
 ### テストが無いモジュール
 
@@ -94,7 +105,8 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_granularity.py` | `src/nlp/topic_granularity.py` | マージ木の入れ子性・束のキーワード・束内のばらつき |
 | `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | 束ねたかの判定・束ねないとき公式の分類がそのまま単位に付くこと（束ねた単位・分類に無いトピックがあれば止まること）・リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・シェアとポジ率の算出・パネルの密度と集中度（期間を省略すると止まること・期間の外を数えないこと）・共通の期間（収集ログの端の日を含む週は使わない／最も遅い oldest と最も早い newest で決まる／ログに無いゲームがあれば止まる）・土台の選び方（発売が期間開始の26週前ちょうどは含める・tier が違えば入らない・手で外せる・発売日が読めなければ止まる）・期間と土台をまとめて決める入口と画面の文・実データでの確認（`data/` がある環境だけ。無ければ飛ばす） |
-| `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと |
+| `test_forecast.py` | `src/timeseries/forecast.py` | 学習とテストの切り方（全単位で同じ週・欠測の除き方）・比べる相手2つ・MAE と比・勝ちの数え方（比が1未満だけ）・Prophet が年次季節性あり／なしで回ること・学習が時間切れのとき Newton 法で学び直すこと |
+| `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと・予測の図が書き出せること・予測の4本が色と線種で見分けられること |
 | `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
 | `test_collection_coverage.py` | `scripts/collect/collect_timeseries_dataset.py` | 収集の網羅性判定（直近しか無いゲームと、直近しか取れなかったゲームの区別） |
 | `test_row_trimming.py` | `scripts/collect/collect_timeseries_dataset.py` | 再収集・再開時のCSV切り詰め（重複を残さず、記録済みの行は消さないこと） |
