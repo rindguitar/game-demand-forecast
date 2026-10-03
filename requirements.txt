@@ -28,7 +28,7 @@ langdetect        # 言語検出（非英語レビュー除外）
 transformers-interpret  # モデル解釈性（Integrated Gradients）
 
 # Phase 7: Time Series (Prophet)
-# - prophet           # 時系列予測
+prophet           # 時系列予測
 
 # Phase 8-9: Time Series (LSTM)
 # - torch             # PyTorch（既に追加済み）
