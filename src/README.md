@@ -91,11 +91,13 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    FP["scripts/timeseries/<br/>forecast_prophet.py"] --> FC["timeseries/forecast.py<br/>分割・予測・当たり具合"]
+    FP["scripts/timeseries/<br/>forecast_prophet.py"] --> FC["timeseries/forecast.py<br/>分割・予測・当たり具合<br/>発売の選び方"]
+    FP --> WK["timeseries/weekly.py<br/>レビューに週の列を足す"]
     FP --> TP["visualization/<br/>timeseries_plots.py<br/>予測の図"]
 ```
 
 `forecast.py` はファイルを読み書きしない純粋な関数だけで、読み書きと図は `forecast_prophet.py` が受け持ちます。
+`weekly.py` は、`--launch-events` のとき発売を選ぶために、レビューへ週の列を足すのに使います（`add_week_column`）。
 
 この構造の意味は次の通りです。
 
@@ -236,14 +238,14 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。Pr
 | ファイル | 説明 |
 |---|---|
 | `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・期待ポジ率・参加ゲーム数）。共通の期間と土台のゲームの決め方（3本のスクリプトの入口）もここに置く |
-| `forecast.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合（MAE）を比べる。ファイルの読み書きはしない純粋な関数だけ（Issue #41） |
+| `forecast.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合（MAE）を比べる。発売を出来事（holidays）として渡すための、発売の選び方もここにある。ファイルの読み書きはしない純粋な関数だけ（Issue #41） |
 
 充足度は**実際のポジ率とあわせて「期待ポジ率」も出します**。`voted_up` はゲーム全体への評価なので、
 トピックの絶対値だとそのゲームの評判を読んでしまうためです（→ `docs/decisions.md` 2026-09-07）。
 差の `positive_rate_gap` が要素そのものの効き方になります。
 
 **可視化は `src/visualization/timeseries_plots.py`**（`plot_series_grid` / `plot_positive_rate_grid` / `plot_overview` / `plot_forecast_grid`）。充足度の配色はオレンジ ↔ アクア。
-予測の図（`plot_forecast_grid`）は、Prophet を青・比べる相手をオレンジにして、同じ色の2本は実線と破線で見分ける。
+予測の図（`plot_forecast_grid`）は、Prophet を青・比べる相手をオレンジにして、同じ色の2本は実線と破線で見分ける。`launches`（単位に渡した発売）を渡したときだけ、その単位の発売週に細い点線を引き、凡例に "Launch week" を足す。
 
 **主要関数（weekly.py）:**
 - `add_week_column(df)` — UNIX秒からその週の月曜を指す列を足す
@@ -278,14 +280,27 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。Pr
 - `split_train_test(df, test_weeks)` — 全単位を同じ週で学習とテストに分け、`(学習, テスト, 切る週)` を返す。
   切る週は欠測の行も含めた週の軸から決める（欠測を除いてから単位ごとに数えると、単位ごとにずれるため）。
   値が欠測の行は学習・テストとも除く
-- `forecast_prophet(train, weeks, yearly)` — Prophet で学習して、指定の週を予測する。`yearly` で年次季節性を
-  切り替える（ほかは既定値・負の予測もクリップしない）。学習が `FIT_TIMEOUT_SECONDS` 秒で終わらなければ、
-  `FitFallbackWarning` を出して Newton 法で学び直す（Stan の L-BFGS が稀に終わらなくなるため）
+- `find_target_launches(games, first_week, cutoff, launch_weeks)` — 出来事として渡す対象の発売を台帳から選ぶ。
+  発売週（発売日を含む週の月曜）から `launch_weeks` 週が、データ期間の最初の週以降と重なり、かつ発売週が
+  切る週より前のもの（期間の直前に出たゲームも入る）。発売日が読めなければ止まる
+- `select_launch_events(reviews, games, units, first_week, cutoff, ...)` — 各単位に渡す発売を選び、
+  `unit / game / release_week / game_mentions / unit_mentions / share` の表を返す。発売ごとの「確かめる期間」
+  （発売週から `launch_weeks` 週。切る週より前で打ち切る）で、そのゲームが単位のレビューの `min_share` 以上を占め、
+  かつ件数が `min_weekly_mentions` × 期間の週数以上の（単位, 発売）の組を選ぶ。単位の集合に無いトピックは数えない
+- `launch_holidays(events, unit, launch_weeks)` — 1単位に渡す発売を Prophet の holidays にする（`holiday` = ゲーム名・
+  `ds` = 発売週・`lower_window` = 0・`upper_window` = 7×(週数−1) 日）。発売が付かない単位は `None`（渡さない）
+- `forecast_prophet(train, weeks, yearly, holidays)` — Prophet で学習して、指定の週を予測する。`yearly` で年次季節性を
+  切り替える（ほかは既定値・負の予測もクリップしない）。`holidays` は渡したときだけ Prophet に渡す。
+  学習が `FIT_TIMEOUT_SECONDS` 秒で終わらなければ、`FitFallbackWarning` を出して、
+  同じ `holidays` のまま Newton 法で学び直す（Stan の L-BFGS が稀に終わらなくなるため）
 - `baseline_mean(train, horizon)` / `baseline_recent(train, horizon, recent_weeks)` — 比べる相手。
   学習期間の平均／欠測を除いた最後の `recent_weeks` 個の平均を、テスト週の数だけ並べる
+- `drop_holiday_weeks(train, holidays)` — 学習期間から、出来事の期間（`ds` + `lower_window` 日〜`ds` + `upper_window` 日）
+  に入る週を除く。発売を渡す単位の比べる相手に、Prophet と同じ情報を渡すため。`holidays` が `None` なら何も除かず、
+  除くと実績が1つも残らなければ止まる
 - `mae(actual, predicted)` / `mae_ratio(mae_prophet, mae_baseline)` — MAE と、`MAE(Prophet) ÷ MAE(比べる相手)`。
   比が1未満なら Prophet の勝ち。相手の MAE が0のときは、Prophet が外していれば `inf`、どちらも0なら `nan`
-- `evaluate_unit(train, test, recent_weeks)` — 1単位を4つの方法で予測し、`(MAE 4つと比 4つの dict, 予測の表)` を返す
+- `evaluate_unit(train, test, recent_weeks, holidays)` — 1単位を4つの方法で予測し、`(MAE 4つと比 4つの dict, 予測の表)` を返す。`holidays` があれば Prophet に渡し、比べる相手はその期間の週を除いた学習期間から作る（`None` なら従来どおり）
 - `summarize_comparisons(metrics)` — 評価表から、4通りの比較（Prophet 2つ × 比べる相手 2つ）ごとに、
   勝った単位数・全単位数・比の中央値をまとめる。勝ちは比が1未満だけ（ちょうど1や欠測は勝ちにしない）
 

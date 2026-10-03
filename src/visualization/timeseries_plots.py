@@ -37,6 +37,7 @@ FORECAST_STYLES = {
 TRAIN_ACTUAL_COLOR = '#9A9A9A'   # 学習期間の実績（灰色）
 TEST_ACTUAL_COLOR = '#1A1A19'    # テスト期間の実績（黒）
 SPLIT_COLOR = '#6B6B6B'          # テスト開始の縦線
+LAUNCH_COLOR = '#6B6B6B'         # 発売の週の縦線（テスト開始の実線と、細い点線で見分ける）
 
 
 def _grid(n: int, columns: int = 3, height: float = 2.2):
@@ -179,7 +180,8 @@ def plot_overview(series: pd.DataFrame, value_column: str, title: str, save_path
 
 
 def plot_forecast_grid(forecasts: pd.DataFrame, title: str, save_path: str,
-                       units: Optional[Sequence] = None, history_weeks: int = 52) -> str:
+                       units: Optional[Sequence] = None, history_weeks: int = 52,
+                       launches: Optional[pd.DataFrame] = None) -> str:
     """
     単位ごとに、実績と4つの予測を重ねた小さい図を並べる
 
@@ -189,14 +191,18 @@ def plot_forecast_grid(forecasts: pd.DataFrame, title: str, save_path: str,
 
     処理の流れ:
       1. 描く単位を決める（省略すると中央値の大きい順。plot_series_grid と同じ並び）
-      2. 単位ごとに、学習期間の終わり・テスト期間の実績・4つの予測を重ねる
-      3. 凡例は図全体で1つだけ置く（小さい図ごとに置くと数が多すぎる）
+      2. 単位ごとに、学習期間の終わり・テスト期間の実績・4つの予測を重ねる。
+         launches があれば、その単位の発売週に細い点線を引く（図の範囲に入るものだけ）
+      3. 凡例は図全体で1つだけ置く（小さい図ごとに置くと数が多すぎる）。
+         launches があれば、発売週の点線の項目を足す
 
     Args:
         forecasts: forecasts.csv を読んだDataFrame。unit / week / split（train か test）/
             actual / keywords と、FORECAST_STYLES の4列が必要
         units: 描く単位の並び。省略すると全単位
         history_weeks: 図に出す学習期間の週数（学習期間の最後からこの週数）
+        launches: 単位に渡した発売（launch_events.csv の形）。unit 列と、日時型の
+            release_week 列が必要。省略（None）すると発売の線も凡例の項目も描かない
     """
     order = units if units is not None else (
         forecasts.groupby('unit')['actual'].median().sort_values(ascending=False).index)
@@ -211,6 +217,11 @@ def plot_forecast_grid(forecasts: pd.DataFrame, title: str, save_path: str,
         for column, (_, color, linestyle) in FORECAST_STYLES.items():
             ax.plot(test['week'], test[column], color=color, linestyle=linestyle, linewidth=1.2)
         ax.axvline(test['week'].min(), color=SPLIT_COLOR, linewidth=0.8)
+        if launches is not None:
+            shown = pd.concat([train['week'], test['week']])
+            for week in launches.loc[launches['unit'] == unit, 'release_week']:
+                if shown.min() <= week <= shown.max():
+                    ax.axvline(week, color=LAUNCH_COLOR, linestyle=':', linewidth=0.8)
         ax.set_title(f"t{unit}  {_label(one['keywords'].iloc[0])}", fontsize=8, loc='left')
         ax.tick_params(labelsize=7)
         ax.margins(x=0.01)
@@ -225,6 +236,9 @@ def plot_forecast_grid(forecasts: pd.DataFrame, title: str, save_path: str,
                Line2D([], [], color=TEST_ACTUAL_COLOR, linewidth=1.2, label='Actual (test)')]
     handles += [Line2D([], [], color=color, linestyle=linestyle, linewidth=1.2, label=label)
                 for label, color, linestyle in FORECAST_STYLES.values()]
+    if launches is not None:
+        handles.append(Line2D([], [], color=LAUNCH_COLOR, linestyle=':', linewidth=0.8,
+                              label='Launch week'))
 
     # 題名と凡例ぶんの余白（インチ）を図の高さに対する割合に直して、上に空ける
     height = fig.get_figheight()

@@ -355,13 +355,14 @@ flowchart LR
 |---|---|
 | `build_weekly_series.py` | 週次時系列の作成と、系列の健全性の点検 |
 | `plot_weekly_series.py` | 折れ線グラフの作成（`data/timeseries/plots/`） |
-| `forecast_prophet.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合を比べる（`data/timeseries/forecast_64/`）。Issue #41 |
+| `forecast_prophet.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合を比べる（`data/timeseries/forecast_64/`）。`--launch-events` で発売を出来事として渡す（`forecast_64_launch/`）。Issue #41 |
 
 **使用方法:**
 ```bash
 docker compose exec dev python scripts/timeseries/build_weekly_series.py
 docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 make forecast-prophet      # 予測と評価。引数は FORECAST_ARGS で渡す
+make forecast-prophet FORECAST_ARGS="--launch-events"   # 発売を出来事として渡す
 ```
 
 **64本（いまの本番）で回すとき**。スクリプトの既定値は24本版のファイルを指しているので、64本は引数で渡します
@@ -394,11 +395,16 @@ docker compose exec dev python scripts/timeseries/plot_weekly_series.py \
 ```mermaid
 flowchart LR
     W[("weekly_series_all.csv")] --> F["forecast_prophet.py"]
+    R[("reviews_timeseries<br/>_with_topics_64.csv")] -.-> F
+    G[("games.csv")] -.-> F
     F --> FC[("forecasts.csv<br/>週ごとの実績と予測")]
     F --> MT[("metrics.csv<br/>単位ごとの当たり具合")]
     F --> SM[("summary.csv<br/>比較ごとの勝った単位数")]
     F --> PL[("plots/forecast_*.png<br/>単位ごとの図")]
+    F -.-> LE[("launch_events.csv<br/>渡した発売")]
 ```
+
+点線は `--launch-events` を付けたときだけ読む入力・書く出力です（下の「発売を出来事として渡す」）。
 
 **評価のしかた**
 
@@ -407,7 +413,7 @@ flowchart LR
 - **予測する4つの方法**: Prophet（年次季節性あり）／Prophet（年次季節性なし）／
   比べる相手①「学習期間の平均」／比べる相手②「直近の平均」（学習期間の最後の4週・`--recent-weeks`）。
   Prophet は年次季節性の有無だけを変え、ほかは既定値のままです。比べる相手も Prophet と同じ学習期間から作ります
-  （発売の山やセールの週も除きません）
+  （発売の山やセールの週も除きません。ただし `--launch-events` のときは、渡した発売の週だけ除きます）
 - **当たり具合**: テスト期間の MAE（予測と実績の差の絶対値の平均）を、4つの方法それぞれで出します
 - **比**: `MAE(Prophet) ÷ MAE(比べる相手)`。**1未満なら Prophet の勝ち**です（ちょうど1や欠測は勝ちにしません）。
   次の2×2の4通りを、勝った単位数・全単位数・比の中央値にまとめます（`summary.csv`）
@@ -419,14 +425,42 @@ flowchart LR
 
 - Prophet の予測が負になっても**クリップしません**。負になった数だけ画面に出します
 
-**出力**（既定は `data/timeseries/forecast_64/`）
+**出力**（既定は `data/timeseries/forecast_64/`。`--launch-events` のときは `data/timeseries/forecast_64_launch/`）
 
 | ファイル | 中身 |
 |---|---|
 | `forecasts.csv` | 縦長。`unit, week, split（train / test）, actual, prophet_yearly, prophet_no_yearly, baseline_mean, baseline_recent`。予測の列はテスト週だけ値が入り、学習週は空 |
 | `metrics.csv` | 1行1単位。`unit, category, keywords`、4つの MAE（`mae_<方法>`）、4つの比（`ratio_<Prophet>_vs_<比べる相手>`） |
 | `summary.csv` | 4通りの比較ごとに、勝った単位数（`wins`）・全単位数（`units`）・比の中央値（`median_ratio`） |
+| `launch_events.csv` | `--launch-events` のときだけ。選んだ（単位, 発売）の組。`unit, game, release_week, game_mentions, unit_mentions, share` |
 | `plots/forecast_01.png` ほか | 単位ごとの小さい図を、30単位ずつ並べる。学習期間の最後の52週（`--plot-weeks`）の実績（灰）、テスト期間の実績（黒）、4つの予測、テスト開始の縦線。ラベルは英語。`--no-plot` で省く |
+
+**発売を出来事として渡す（`--launch-events`）**
+
+年次季節性は、去年1回きりの発売の山を「毎年の山」として覚えて、1年後に再生します
+（例: t2 の Blue Prince の山を、1年後の4〜5月に再生）。そこで発売を Prophet の
+holidays（出来事）として渡し、山を「発売のせい」と学ばせます。
+
+- **対象の発売**: 発売週（発売日を含む週の月曜）から8週（`--launch-weeks`）が、データ期間の最初の週以降と
+  重なり、かつ発売週が切る週より前のもの。期間の直前に出たゲームも入ります（64本では25本）。
+  台帳（`--games`）の発売日が読めなければ止まります
+- **選び方**: 発売ごとに「確かめる期間」（発売週から8週。**切る週より前で打ち切る**ので、テスト期間のレビューは
+  使いません）を決め、その中で単位ごとに数えます。次の2つを**両方**満たす（単位, 発売）の組を選びます
+  - 割合: その単位の全レビューのうち、そのゲームのレビューが 0.5 以上（`--launch-min-share`。ちょうど0.5も含む）
+  - 件数: そのゲームのレビューが 週10件（`--launch-min-weekly`）× 確かめる期間の週数 以上
+    （打ち切りで週数が減ったら、その週数で掛ける）
+- **渡し方**: 単位ごとに、選んだ発売を holidays にします（`holiday` = ゲーム名で発売ごとに別の出来事、
+  `ds` = 発売週、`lower_window` = 0、`upper_window` = 7×(8−1) 日）。年次季節性の切り替えなどは変えません。
+  **発売が付かない単位には holidays を渡さない**ので、`--launch-events` なしと同じ結果になります
+- **比べる相手にも同じ情報**: 発売が付く単位では、学習期間から「渡した発売の、発売週から8週」を除いて、
+  学習期間の平均・直近の平均を出します（直近は除いた後の最後の4個）。Prophet には除かない学習期間をそのまま渡します。
+  除くと実績が1つも残らなければ止まります
+- **読むファイル**: `--reviews`（既定 `reviews_timeseries_with_topics_64.csv`。726MBあるので `game_name` /
+  `timestamp_created` / `topic_id` の3列だけ読む）と `--games`（既定 `games.csv`）
+- **画面と出力**: 対象の発売の数・選んだ組の数・発売が付いた単位／付かなかった単位の数を表示し、
+  選んだ組を `launch_events.csv` に書きます。図には、その単位に渡した発売の週を細い点線で引きます
+  （図の範囲に入るものだけ・凡例は "Launch week"）。
+  出力先は既定で `forecast_64_launch/` で、発売を渡さない結果（`forecast_64/`）は上書きしません
 
 このスクリプトの既定値（`--input`・`--output-dir`）は**64本のファイルを指します**。
 ほかの timeseries スクリプトは24本版を指したままです（Issue #56）。
