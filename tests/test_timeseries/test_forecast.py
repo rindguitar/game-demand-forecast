@@ -4,8 +4,9 @@ Prophet 予測モジュールのテスト
 Prophet そのものの出来は確かめない（実データで回して見る）。ここでは、学習とテストの切り方・
 比べる相手・MAE と比・勝ちの数え方が仕様どおりであることと、Prophet が年次季節性あり・なしの
 両方で回ることを確かめる。発売を出来事として渡す部分（発売の選び方・holidays の形・
-比べる相手が発売後の週を除くこと）も確かめる。数値を厳密に確かめたいところは、
-Prophet を偽物に差し替える。
+比べる相手が発売後の週を除くこと）も確かめる。発売を水準の段差としても渡す部分
+（段差の印の付け方・比べる相手の作り方・発売の効き目の表・勝ちの基準）も確かめる。
+数値を厳密に確かめたいところは、Prophet を偽物に差し替える。
 """
 
 import sys
@@ -19,20 +20,30 @@ from prophet import Prophet
 from src.timeseries import forecast
 from src.timeseries.forecast import (
     COMPARISONS,
+    LAUNCH_EFFECT_COLUMNS,
     METHODS,
+    PROPHET_METHODS,
     FitFallbackWarning,
     baseline_mean,
     baseline_recent,
+    check_win_criterion,
     drop_holiday_weeks,
     evaluate_unit,
+    evaluate_unit_with_steps,
     find_target_launches,
+    fit_prophet,
     forecast_prophet,
+    keep_weeks_after_latest_launch,
+    launch_effects_table,
     launch_holidays,
+    launch_steps,
     mae,
     mae_ratio,
+    read_launch_effects,
     select_launch_events,
     split_train_test,
     summarize_comparisons,
+    with_step_columns,
 )
 
 # 2024-01-01 は月曜日。ここを起点に週を作る
@@ -500,6 +511,141 @@ def test_drop_holiday_weeks_with_everything_removed_raises():
         drop_holiday_weeks(_weekly(range(3)), _holidays(('Alpha', 0)))
 
 
+# ---------------------------------------------------------------- 段差の印（発売を水準の段差として渡す）
+
+def _steps(*launches):
+    """(ゲーム名, 起点からの週数) の並びから、段差の印の表（step / game / release_week）を作る"""
+    return pd.DataFrame({
+        'step': [f'step_{i}' for i in range(len(launches))],
+        'game': [name for name, _ in launches],
+        'release_week': [MONDAY + pd.Timedelta(weeks=week) for _, week in launches]})
+
+
+def _ds_frame(first_week, n_weeks):
+    """first_week 週目から n_weeks 週の、ds 列だけを持つ表"""
+    return pd.DataFrame({'ds': _weekly(range(n_weeks), first_week)['week']})
+
+
+@pytest.mark.parametrize('release_week, gets_step', [(-2, False), (0, False), (1, True)])
+def test_launch_steps_gives_step_only_to_launch_after_first_week(release_week, gets_step):
+    """段差の印が付くのは、発売週が学習期間の最初の週（0週目）より後の発売だけ
+
+    最初の週より前（期間の直前の発売）も、最初の週と同じ週の発売も付かない。
+    発売前の週が学習期間に無いと、印がずっと1になって段差を学べないため。
+    """
+    steps = launch_steps(_holidays(('Alpha', release_week)), MONDAY)
+    assert (not steps.empty) == gets_step
+
+
+def test_launch_steps_names_columns_in_launch_order_not_by_game_name():
+    """列名は、発売の順に step_0, step_1 ... と振る（ゲーム名は列名にしない）"""
+    steps = launch_steps(_holidays(("Baldur's Gate 3", 3), ('Beta', 8)), MONDAY)
+    assert steps['step'].tolist() == ['step_0', 'step_1']
+
+
+def test_launch_steps_keeps_game_and_release_week_for_each_step():
+    """列名と、ゲーム名・発売週との対応を持つ"""
+    steps = launch_steps(_holidays(('Alpha', 3), ('Beta', 8)), MONDAY)
+    assert steps[['step', 'game', 'release_week']].values.tolist() == [
+        ['step_0', 'Alpha', MONDAY + pd.Timedelta(weeks=3)],
+        ['step_1', 'Beta', MONDAY + pd.Timedelta(weeks=8)]]
+
+
+def test_launch_steps_numbers_only_launches_that_get_a_step():
+    """段差の印が付かない発売は飛ばして、付く発売だけに step_0 から振る"""
+    steps = launch_steps(_holidays(('Old', -2), ('Alpha', 3)), MONDAY)
+    assert steps[['step', 'game']].values.tolist() == [['step_0', 'Alpha']]
+
+
+def test_launch_steps_without_holidays_is_empty():
+    """発売が付かない単位（holidays が None）には、段差の印も無い"""
+    assert launch_steps(None, MONDAY).empty
+
+
+def test_with_step_columns_is_zero_before_release_week():
+    """段差の印は、発売週より前の週では0"""
+    result = with_step_columns(_ds_frame(0, 6), _steps(('Alpha', 3)))
+    assert result['step_0'].tolist()[:3] == [0, 0, 0]
+
+
+def test_with_step_columns_is_one_from_release_week_on():
+    """段差の印は、発売週から後ではずっと1（発売週そのものも1）"""
+    result = with_step_columns(_ds_frame(0, 6), _steps(('Alpha', 3)))
+    assert result['step_0'].tolist()[3:] == [1, 1, 1]
+
+
+def test_with_step_columns_is_one_in_future_weeks():
+    """学習期間より後の未来の週（予測する週）も1"""
+    result = with_step_columns(_ds_frame(200, 4), _steps(('Alpha', 3)))
+    assert result['step_0'].tolist() == [1, 1, 1, 1]
+
+
+def test_with_step_columns_adds_one_column_per_step_after_existing_columns():
+    """段差の印ごとに、列を1つずつ、元の列の後ろに足す"""
+    result = with_step_columns(_ds_frame(0, 6), _steps(('Alpha', 3), ('Beta', 5)))
+    assert result.columns.tolist() == ['ds', 'step_0', 'step_1']
+
+
+def test_with_step_columns_switches_each_step_at_its_own_release_week():
+    """段差の印は、それぞれの発売週（3週目と5週目）で0から1に変わる"""
+    result = with_step_columns(_ds_frame(0, 7), _steps(('Alpha', 3), ('Beta', 5)))
+    assert result[['step_0', 'step_1']].values.tolist() == [
+        [0, 0], [0, 0], [0, 0], [1, 0], [1, 0], [1, 1], [1, 1]]
+
+
+@pytest.mark.parametrize('steps', [None, _steps()])
+def test_with_step_columns_without_steps_adds_nothing(steps):
+    """段差の印が無い（None か空）ときは、何も足さない"""
+    assert with_step_columns(_ds_frame(0, 6), steps).columns.tolist() == ['ds']
+
+
+def test_keep_weeks_after_latest_launch_keeps_only_weeks_after_window_end():
+    """最新の発売の窓（発売週から3週）が終わった次の週から後だけを残す。発売前の週も残さない
+
+    2週目に発売なら窓は2・3・4週目。5週目以降が残り、窓より前の0・1週目は残らない。
+    """
+    remaining = keep_weeks_after_latest_launch(_weekly(range(12)), _holidays(('Alpha', 2)))
+    assert remaining['share'].tolist() == [5, 6, 7, 8, 9, 10, 11]
+
+
+def test_keep_weeks_after_latest_launch_uses_latest_of_several_launches():
+    """発売が複数あれば、いちばん新しい発売の窓の後だけを残す
+
+    2週目と8週目に発売なら、新しいほうの窓は8・9・10週目。11週目だけが残る。
+    """
+    remaining = keep_weeks_after_latest_launch(_weekly(range(12)),
+                                               _holidays(('Alpha', 2), ('Beta', 8)))
+    assert remaining['share'].tolist() == [11]
+
+
+def test_keep_weeks_after_latest_launch_counts_launch_before_train():
+    """学習期間より前に始まった発売（段差の印を付けない発売）も、窓の終わりを数える
+
+    -1週目に発売なら窓は -1・0・1週目。発売がこれだけでも、2週目以降だけが残る。
+    """
+    remaining = keep_weeks_after_latest_launch(_weekly(range(12)), _holidays(('Old', -1)))
+    assert remaining['share'].tolist() == list(range(2, 12))
+
+
+def test_keep_weeks_after_latest_launch_without_holidays_returns_train_as_is():
+    """発売が無い（None）ときは、何も除かない"""
+    train = _weekly(range(12))
+    assert keep_weeks_after_latest_launch(train, None) is train
+
+
+def test_keep_weeks_after_latest_launch_with_no_weeks_left_raises():
+    """窓の後の週が1つも残らなければ止まる（4週目に発売で窓が4・5・6週目なら、6週の学習期間には残らない）"""
+    with pytest.raises(ValueError):
+        keep_weeks_after_latest_launch(_weekly(range(6)), _holidays(('Alpha', 4)))
+
+
+def test_keep_weeks_after_latest_launch_with_only_missing_values_left_raises():
+    """窓の後の週があっても、値がすべて欠測なら止まる（実績が1つも残らない）"""
+    values = [0, 1, 2, 3, 4, np.nan, np.nan]
+    with pytest.raises(ValueError):
+        keep_weeks_after_latest_launch(_weekly(values), _holidays(('Alpha', 2)))
+
+
 # ---------------------------------------------------------------- MAE と比
 
 def test_mae_is_mean_absolute_difference():
@@ -740,6 +886,215 @@ def test_forecast_prophet_launch_holiday_weakens_yearly_replay_of_one_off_bump()
     assert (with_launch - 0.02).mean() < 0.5 * (without - 0.02).mean()
 
 
+@pytest.fixture
+def regressor_recording_prophet(monkeypatch):
+    """Prophet を、足された説明変数の列名・学習データの列・予測に渡された表を記録する偽物に差し替える"""
+    record = {'regressors': [], 'history_columns': [], 'future': []}
+
+    class Stub:
+        def __init__(self, **kwargs):
+            pass
+
+        def add_regressor(self, name):
+            record['regressors'].append(name)
+
+        def fit(self, history, **options):
+            record['history_columns'].append(history.columns.tolist())
+            return self
+
+        def predict(self, future):
+            record['future'].append(future)
+            return pd.DataFrame({'ds': future['ds'], 'yhat': np.zeros(len(future))})
+
+    monkeypatch.setattr(forecast, 'Prophet', Stub)
+    return record
+
+
+def test_forecast_prophet_adds_each_step_as_regressor(regressor_recording_prophet):
+    """段差の印は、1つずつ Prophet の説明変数（add_regressor）として足す"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True, steps=_steps(('Alpha', 60), ('Beta', 80)))
+    assert regressor_recording_prophet['regressors'] == ['step_0', 'step_1']
+
+
+def test_forecast_prophet_gives_step_columns_with_train(regressor_recording_prophet):
+    """学習データに、段差の印の列（ds / y の後ろ）を足して渡す"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True, steps=_steps(('Alpha', 60), ('Beta', 80)))
+    assert regressor_recording_prophet['history_columns'] == [['ds', 'y', 'step_0', 'step_1']]
+
+
+def test_forecast_prophet_gives_step_one_for_forecast_weeks(regressor_recording_prophet):
+    """予測する週にも段差の印を渡す。発売週より後の未来の週なので、すべて1"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True, steps=_steps(('Alpha', 60)))
+    assert regressor_recording_prophet['future'][0]['step_0'].tolist() == [1] * 8
+
+
+def test_forecast_prophet_without_steps_adds_no_regressor(regressor_recording_prophet):
+    """段差の印を渡さなければ、説明変数も足さず、学習データも ds / y だけ"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True)
+    assert (regressor_recording_prophet['regressors'],
+            regressor_recording_prophet['history_columns']) == ([], [['ds', 'y']])
+
+
+def test_forecast_prophet_timeout_refit_keeps_steps(monkeypatch):
+    """学習が時間切れになって Newton 法で学び直すときも、同じ段差の印を説明変数に足す"""
+    added = []
+
+    class Stub:
+        def __init__(self, **kwargs):
+            added.append([])
+
+        def add_regressor(self, name):
+            added[-1].append(name)
+
+        def fit(self, history, **options):
+            if options.get('algorithm') != 'Newton':
+                raise TimeoutError
+            return self
+
+        def predict(self, future):
+            return pd.DataFrame({'ds': future['ds'], 'yhat': np.zeros(len(future))})
+
+    monkeypatch.setattr(forecast, 'Prophet', Stub)
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    with pytest.warns(FitFallbackWarning):
+        forecast_prophet(train, test['week'], yearly=False, steps=_steps(('Alpha', 60)))
+    assert added == [['step_0'], ['step_0']]
+
+
+def test_forecast_prophet_with_steps_returns_finite_values():
+    """段差の印を渡して本物の Prophet で学習しても、有限の予測が返る"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    holidays = _holidays(('Alpha', 60), upper_window=49)
+    steps = launch_steps(holidays, train['week'].min())
+    result = forecast_prophet(train, test['week'], yearly=True, holidays=holidays, steps=steps)
+    assert np.isfinite(result).all()
+
+
+def test_forecast_prophet_with_steps_yearly_switch_changes_forecast():
+    """段差の印を渡しても、年次季節性の有無で予測が変わる（切り替えが効いている）"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    holidays = _holidays(('Alpha', 60), upper_window=49)
+    steps = launch_steps(holidays, train['week'].min())
+    with_yearly = forecast_prophet(train, test['week'], yearly=True, holidays=holidays, steps=steps)
+    without_yearly = forecast_prophet(train, test['week'], yearly=False, holidays=holidays,
+                                      steps=steps)
+    assert not np.allclose(with_yearly, without_yearly)
+
+
+# 水準が上がったまま残る合成データ: 90週目に発売して、水準が0.02から0.05に上がる。
+# 90週目は、Prophet が trend の変化点を置く範囲（学習期間の前半8割）の外なので、trend では追えない
+LEVEL_BEFORE = 0.02
+LEVEL_STEP = 0.03
+LEVEL_RELEASE_WEEK = 90
+
+
+def _level_shift_values(n_weeks=118):
+    """発売で水準が LEVEL_STEP だけ上がったまま残る系列（ノイズなし）。発売週から8週は、山 LAUNCH_BUMP も乗る"""
+    values = np.full(n_weeks, LEVEL_BEFORE)
+    values[LEVEL_RELEASE_WEEK:] += LEVEL_STEP
+    values[LEVEL_RELEASE_WEEK:LEVEL_RELEASE_WEEK + 8] += LAUNCH_BUMP
+    return values
+
+
+@pytest.fixture(scope='module')
+def level_shift():
+    """水準が上がったまま残る系列を、学習110週・テスト8週に分けたもの。(学習, テスト, holidays, 段差の印)"""
+    series = _weekly(_level_shift_values())
+    train, test = series.iloc[:110], series.iloc[110:]
+    events = pd.DataFrame({'unit': [1], 'game': ['Alpha'],
+                           'release_week': [MONDAY + pd.Timedelta(weeks=LEVEL_RELEASE_WEEK)]})
+    holidays = launch_holidays(events, 1)
+    return train, test, holidays, launch_steps(holidays, train['week'].min())
+
+
+def test_forecast_prophet_steps_follow_level_that_stays_after_launch(level_shift):
+    """発売で水準が上がったまま残る系列では、段差の印を渡すと、上がった後の水準に近く予測する
+
+    山の印（holidays）だけだと、山は8週で戻ると学ぶので、残った水準を取りこぼす（年次季節性なし）。
+    """
+    train, test, holidays, steps = level_shift
+    actual = test['share'].to_numpy()
+    without = forecast_prophet(train, test['week'], yearly=False, holidays=holidays)
+    with_steps = forecast_prophet(train, test['week'], yearly=False, holidays=holidays, steps=steps)
+    assert mae(actual, with_steps) < 0.5 * mae(actual, without)
+
+
+@pytest.fixture(scope='module')
+def level_shift_effects(level_shift):
+    """水準が上がったまま残る系列を、段差の印つきで学習したモデルから読んだ、発売の効き目"""
+    train, _, holidays, steps = level_shift
+    model = fit_prophet(train, yearly=False, holidays=holidays, steps=steps)
+    return read_launch_effects(model, train, holidays, steps)
+
+
+def test_read_launch_effects_step_size_is_close_to_synthetic_step(level_shift_effects):
+    """段差の係数（step_size）は、合成した段差の大きさ（0.03。シェアの単位）に近い"""
+    assert level_shift_effects['step_size'].iloc[0] == pytest.approx(LEVEL_STEP, rel=0.1)
+
+
+def test_read_launch_effects_spike_peak_is_close_to_synthetic_bump_peak(level_shift_effects):
+    """山の印の効き目の最大値（spike_peak）は、合成した山の高さ（発売週の 0.06）に近い"""
+    assert level_shift_effects['spike_peak'].iloc[0] == pytest.approx(LAUNCH_BUMP[0], rel=0.1)
+
+
+def test_read_launch_effects_returns_documented_columns(level_shift_effects):
+    """返す表の列は game / release_week / has_step / spike_peak / step_size"""
+    assert level_shift_effects.columns.tolist() == [
+        'game', 'release_week', 'has_step', 'spike_peak', 'step_size']
+
+
+def test_read_launch_effects_gives_one_row_per_launch(level_shift_effects):
+    """発売1つにつき1行。ゲーム名と発売週が付く"""
+    assert level_shift_effects[['game', 'release_week', 'has_step']].values.tolist() == [
+        ['Alpha', MONDAY + pd.Timedelta(weeks=LEVEL_RELEASE_WEEK), True]]
+
+
+@pytest.fixture(scope='module')
+def two_launch_effects():
+    """発売が2つある系列（Old は -3週目に発売。段差の印は付かない。Alpha は 90週目）の、発売の効き目
+
+    Old の山の続きだけが0〜4週目に残る。年次季節性なしで学習したモデルから読む。
+    """
+    values = _level_shift_values()
+    values[:5] += LAUNCH_BUMP[3:]
+    series = _weekly(values)
+    train = series.iloc[:110]
+    events = pd.DataFrame({
+        'unit': [1, 1], 'game': ['Old', 'Alpha'],
+        'release_week': [MONDAY + pd.Timedelta(weeks=week) for week in (-3, LEVEL_RELEASE_WEEK)]})
+    holidays = launch_holidays(events, 1)
+    steps = launch_steps(holidays, train['week'].min())
+    model = fit_prophet(train, yearly=False, holidays=holidays, steps=steps)
+    return read_launch_effects(model, train, holidays, steps)
+
+
+def test_read_launch_effects_marks_which_launch_has_step(two_launch_effects):
+    """段差の印が付いたかを、発売ごとに has_step で示す（期間の直前の Old には付かない）"""
+    assert two_launch_effects[['game', 'has_step']].values.tolist() == [
+        ['Old', False], ['Alpha', True]]
+
+
+def test_read_launch_effects_leaves_step_size_empty_for_launch_without_step(two_launch_effects):
+    """段差の印が無い発売は、step_size が空（欠測）"""
+    assert two_launch_effects['step_size'].isna().tolist() == [True, False]
+
+
+def test_read_launch_effects_gives_spike_peak_for_launch_without_step(two_launch_effects):
+    """段差の印が無い発売にも、山の印の効き目は付く（学習期間と重なる週の最大値）"""
+    assert np.isfinite(two_launch_effects['spike_peak']).all()
+
+
+def test_read_launch_effects_without_holidays_returns_empty_table_with_columns():
+    """発売が付かない単位（holidays が None）は、列だけを持つ空の表"""
+    effects = read_launch_effects(None, _weekly(range(6)), None, None)
+    assert (effects.columns.tolist(), len(effects)) == (
+        ['game', 'release_week', 'has_step', 'spike_peak', 'step_size'], 0)
+
+
 # ---------------------------------------------------------------- 1単位の評価
 
 @pytest.fixture
@@ -889,6 +1244,185 @@ def test_evaluate_unit_with_prophet_and_holidays_returns_finite_metrics():
     assert np.isfinite(list(metrics.values())).all()
 
 
+# ---------------------------------------------------------------- 1単位の評価（段差の印を渡す版）
+
+@pytest.fixture
+def fake_step_fits(monkeypatch):
+    """Prophet の学習・予測・効き目の読み取りを偽物に差し替え、学習のたびの引数を記録する
+
+    学習したモデルの代わりに yearly を返し、予測は年次季節性ありなら常に 0.3、なしなら常に -0.1。
+    効き目は空の表。MAE と比べる相手の数値を厳密に確かめるため。
+    """
+    calls = []
+
+    def fake_fit(train, yearly, week_column='week', value_column='share', fit_timeout=None,
+                 holidays=None, steps=None):
+        calls.append({'train': train, 'yearly': yearly, 'holidays': holidays, 'steps': steps})
+        return yearly
+
+    def fake_predict(model, weeks, steps=None):
+        return np.full(len(weeks), 0.3 if model else -0.1)
+
+    def fake_effects(model, train, holidays, steps, week_column='week'):
+        return pd.DataFrame(columns=['game', 'release_week', 'has_step', 'spike_peak', 'step_size'])
+
+    monkeypatch.setattr(forecast, 'fit_prophet', fake_fit)
+    monkeypatch.setattr(forecast, 'predict_prophet', fake_predict)
+    monkeypatch.setattr(forecast, 'read_launch_effects', fake_effects)
+    return calls
+
+
+def test_evaluate_unit_with_steps_passes_steps_to_both_prophet_fits(fake_step_fits, unit_data):
+    """年次季節性あり・なしの両方の学習に、同じ段差の印を渡す
+
+    学習は0〜5週目。2週目の発売は、学習期間の最初の週より後なので印が付く。
+    """
+    evaluate_unit_with_steps(*unit_data, holidays=_holidays(('Alpha', 2)))
+    assert [call['steps']['step'].tolist() for call in fake_step_fits] == [['step_0'], ['step_0']]
+
+
+def test_evaluate_unit_with_steps_gives_no_step_to_launch_in_first_train_week(fake_step_fits,
+                                                                              unit_data):
+    """発売週が学習期間の最初の週（0週目）の発売には、段差の印を渡さない。山の印（holidays）は渡す"""
+    holidays = _holidays(('Alpha', 0))
+    evaluate_unit_with_steps(*unit_data, holidays=holidays)
+    assert [(call['steps'].empty, call['holidays'] is holidays) for call in fake_step_fits] == [
+        (True, True), (True, True)]
+
+
+def test_evaluate_unit_with_steps_fits_yearly_then_no_yearly(fake_step_fits, unit_data):
+    """学習は、年次季節性あり → なし の順"""
+    evaluate_unit_with_steps(*unit_data)
+    assert [call['yearly'] for call in fake_step_fits] == [True, False]
+
+
+def test_evaluate_unit_with_steps_gives_prophet_whole_train(fake_step_fits, unit_data):
+    """Prophet には、発売後の週を除かない学習期間をそのまま渡す（除くのは比べる相手だけ）"""
+    evaluate_unit_with_steps(*unit_data, holidays=_holidays(('Alpha', 1), upper_window=7))
+    assert [len(call['train']) for call in fake_step_fits] == [6, 6]
+
+
+def test_evaluate_unit_with_steps_returns_predictions_by_test_week(fake_step_fits, unit_data):
+    """予測は、テスト週ごとに実績と4つの予測が並ぶ（evaluate_unit と同じ形）"""
+    _, predictions, _ = evaluate_unit_with_steps(*unit_data)
+    assert predictions.columns.tolist() == ['week', 'actual', *METHODS]
+
+
+def test_evaluate_unit_with_steps_puts_each_prophet_fit_in_its_own_column(fake_step_fits,
+                                                                          unit_data):
+    """年次季節性ありの予測は prophet_yearly、なしの予測は prophet_no_yearly の列に入る"""
+    _, predictions, _ = evaluate_unit_with_steps(*unit_data)
+    assert predictions.iloc[0][['prophet_yearly', 'prophet_no_yearly']].tolist() == [0.3, -0.1]
+
+
+def test_evaluate_unit_with_steps_returns_mae_of_four_methods(fake_step_fits, unit_data):
+    """発売が付かない単位は、evaluate_unit と同じ4つの MAE になる"""
+    metrics, _, _ = evaluate_unit_with_steps(*unit_data, recent_weeks=2)
+    assert {key: value for key, value in metrics.items() if key.startswith('mae_')} == (
+        pytest.approx({'mae_prophet_yearly': 0.3, 'mae_prophet_no_yearly': 0.7,
+                       'mae_baseline_mean': 0.25, 'mae_baseline_recent': 0.1}))
+
+
+def test_evaluate_unit_with_steps_baseline_mean_uses_weeks_after_latest_launch(fake_step_fits,
+                                                                               unit_data):
+    """比べる相手①の平均は、最新の発売の窓が終わった次の週以降で出す
+
+    学習は 0.1〜0.6 の6週。1週目に発売で窓が2週（1・2週目）なら、3〜5週目（0.4・0.5・0.6）で平均 0.5
+    （学習期間ぜんぶなら 0.35、窓の週だけを除くなら 0.4）。
+    """
+    _, predictions, _ = evaluate_unit_with_steps(
+        *unit_data, holidays=_holidays(('Alpha', 1), upper_window=7))
+    assert predictions['baseline_mean'].tolist() == pytest.approx([0.5, 0.5])
+
+
+def test_evaluate_unit_with_steps_baseline_recent_averages_last_weeks_after_launch(fake_step_fits,
+                                                                                   unit_data):
+    """比べる相手②の直近の平均は、最新の発売の後の週のうちの、最後の recent_weeks 個で出す
+
+    後の週は 0.4・0.5・0.6。最後の2個の平均は 0.55。
+    """
+    _, predictions, _ = evaluate_unit_with_steps(
+        *unit_data, recent_weeks=2, holidays=_holidays(('Alpha', 1), upper_window=7))
+    assert predictions['baseline_recent'].tolist() == pytest.approx([0.55, 0.55])
+
+
+def test_evaluate_unit_with_steps_baseline_recent_does_not_reach_back_before_launch(
+        fake_step_fits, unit_data):
+    """発売の後の週が recent_weeks 個に満たなければ、あるぶん（0.4・0.5・0.6）で平均する
+
+    発売前の週までさかのぼって4個にしない（さかのぼると 0.3〜0.6 の平均 0.45 になる）。
+    """
+    _, predictions, _ = evaluate_unit_with_steps(
+        *unit_data, recent_weeks=4, holidays=_holidays(('Alpha', 1), upper_window=7))
+    assert predictions['baseline_recent'].tolist() == pytest.approx([0.5, 0.5])
+
+
+def test_evaluate_unit_with_steps_baselines_follow_latest_of_several_launches(fake_step_fits,
+                                                                              unit_data):
+    """発売が複数あれば、いちばん新しい発売（2週目。窓は2・3週目）の後の4・5週目（0.5・0.6）で平均 0.55"""
+    holidays = _holidays(('Alpha', 0), ('Beta', 2), upper_window=7)
+    _, predictions, _ = evaluate_unit_with_steps(*unit_data, holidays=holidays)
+    assert predictions['baseline_mean'].tolist() == pytest.approx([0.55, 0.55])
+
+
+def test_evaluate_unit_with_steps_baselines_count_launch_before_train(fake_step_fits, unit_data):
+    """段差の印を付けない期間の直前の発売だけの単位も、比べる相手はその窓の後の週で作る
+
+    -1週目に発売で窓が2週（-1・0週目）なら、1〜5週目（0.2〜0.6）で平均 0.4（学習期間ぜんぶなら 0.35）。
+    """
+    _, predictions, _ = evaluate_unit_with_steps(
+        *unit_data, holidays=_holidays(('Old', -1), upper_window=7))
+    assert predictions['baseline_mean'].tolist() == pytest.approx([0.4, 0.4])
+
+
+def test_evaluate_unit_with_steps_without_holidays_uses_whole_train_for_baselines(fake_step_fits,
+                                                                                  unit_data):
+    """発売が付かない単位の比べる相手は、evaluate_unit と同じく学習期間ぜんぶで作る（平均 0.35）"""
+    _, predictions, _ = evaluate_unit_with_steps(*unit_data)
+    assert predictions['baseline_mean'].tolist() == pytest.approx([0.35, 0.35])
+
+
+def test_evaluate_unit_with_steps_with_no_weeks_after_latest_launch_raises(fake_step_fits,
+                                                                           unit_data):
+    """最新の発売の窓が学習期間の終わりまで続き、後の週が1つも無ければ止まる"""
+    with pytest.raises(ValueError):
+        evaluate_unit_with_steps(*unit_data, holidays=_holidays(('Alpha', 4)))
+
+
+def test_evaluate_unit_with_steps_without_test_values_raises(fake_step_fits, unit_data):
+    """テスト期間に実績が無ければ止まる"""
+    train, test = unit_data
+    with pytest.raises(ValueError):
+        evaluate_unit_with_steps(train, test.iloc[:0])
+
+
+@pytest.fixture(scope='module')
+def prophet_step_evaluation():
+    """本物の Prophet で、合成データ1単位（学習110週・テスト8週。60週目に発売）を段差の印つきで評価した結果"""
+    return evaluate_unit_with_steps(_seasonal(110), _seasonal(8, first_week=110),
+                                    holidays=_holidays(('Alpha', 60), upper_window=49))
+
+
+def test_evaluate_unit_with_steps_with_prophet_returns_finite_metrics(prophet_step_evaluation):
+    """本物の Prophet に段差の印を渡しても、8つの指標がすべて有限の値で返る"""
+    metrics, _, _ = prophet_step_evaluation
+    assert np.isfinite(list(metrics.values())).all()
+
+
+def test_evaluate_unit_with_steps_with_prophet_returns_effects_per_prophet_and_launch(
+        prophet_step_evaluation):
+    """発売の効き目は、Prophet の型（年次季節性あり → なし）× 発売ごとに1行"""
+    _, _, effects = prophet_step_evaluation
+    assert effects[['prophet', 'game']].values.tolist() == [
+        ['prophet_yearly', 'Alpha'], ['prophet_no_yearly', 'Alpha']]
+
+
+def test_evaluate_unit_with_steps_without_holidays_returns_empty_effects():
+    """発売が付かない単位（holidays が None）の発売の効き目は、空の表（本物の Prophet で確かめる）"""
+    _, _, effects = evaluate_unit_with_steps(_seasonal(110), _seasonal(8, first_week=110))
+    assert effects.empty
+
+
 # ---------------------------------------------------------------- まとめ
 
 def _ratios(**ratio_by_comparison):
@@ -947,3 +1481,117 @@ def test_summarize_comparisons_gives_median_ratio(four_unit_metrics):
     """比の中央値を出す（欠測は除く）"""
     medians = summarize_comparisons(four_unit_metrics)['median_ratio']
     assert medians.tolist() == pytest.approx([0.95, 1.0, 0.25, 3.0])
+
+
+# ---------------------------------------------------------------- 発売の効き目の表（launch_effects.csv）
+
+EFFECT_COLUMNS_OF_UNIT = ['prophet', 'game', 'release_week', 'has_step', 'spike_peak', 'step_size']
+
+
+def _unit_effects(*launches):
+    """(ゲーム名, 起点からの週数, 段差の大きさ) の並びから、1単位ぶんの効き目の表を作る
+
+    Prophet の型ごとに全発売を並べる（evaluate_unit_with_steps が返す形）。
+    段差の大きさが None の発売は、段差の印が無い発売（step_size は欠測）。
+    """
+    rows = [(prophet, name, MONDAY + pd.Timedelta(weeks=week), size is not None, 0.05,
+             np.nan if size is None else size)
+            for prophet in PROPHET_METHODS for name, week, size in launches]
+    return pd.DataFrame(rows, columns=EFFECT_COLUMNS_OF_UNIT)
+
+
+@pytest.fixture
+def effects_by_unit():
+    """単位3（Old: 段差なし・Alpha: 段差あり）と、単位1（Gamma: 段差あり）の効き目。単位の順はわざと逆"""
+    return {3: _unit_effects(('Old', -3, None), ('Alpha', 10, 0.02)),
+            1: _unit_effects(('Gamma', 30, 0.01))}
+
+
+def test_launch_effects_table_has_documented_columns(effects_by_unit):
+    """列は prophet / unit / keywords / game / release_week / has_step / spike_peak / step_size"""
+    table = launch_effects_table(effects_by_unit, {1: 'puzzle', 3: 'shooter'})
+    assert table.columns.tolist() == LAUNCH_EFFECT_COLUMNS
+
+
+def test_launch_effects_table_gives_one_row_per_prophet_and_launch(effects_by_unit):
+    """Prophet の2つの型 × 発売3つ（単位3に2つ・単位1に1つ）で6行"""
+    table = launch_effects_table(effects_by_unit, {1: 'puzzle', 3: 'shooter'})
+    assert len(table) == 6
+
+
+def test_launch_effects_table_adds_unit_and_keywords(effects_by_unit):
+    """単位とキーワードの列を、その単位の行に付ける"""
+    table = launch_effects_table(effects_by_unit, {1: 'puzzle', 3: 'shooter'})
+    gamma = table[table['game'] == 'Gamma']
+    assert gamma[['unit', 'keywords']].drop_duplicates().values.tolist() == [[1, 'puzzle']]
+
+
+def test_launch_effects_table_orders_by_prophet_then_unit_then_release_week(effects_by_unit):
+    """並びは、Prophet の型（年次季節性あり → なし）→ 単位 → 発売週"""
+    table = launch_effects_table(effects_by_unit, {1: 'puzzle', 3: 'shooter'})
+    assert table[['prophet', 'unit', 'game']].values.tolist() == [
+        ['prophet_yearly', 1, 'Gamma'], ['prophet_yearly', 3, 'Old'],
+        ['prophet_yearly', 3, 'Alpha'],
+        ['prophet_no_yearly', 1, 'Gamma'], ['prophet_no_yearly', 3, 'Old'],
+        ['prophet_no_yearly', 3, 'Alpha']]
+
+
+def test_launch_effects_table_leaves_step_size_empty_for_launch_without_step(effects_by_unit):
+    """段差の印が無い発売は、step_size が空（欠測）のまま。ほかの発売は値を持つ"""
+    table = launch_effects_table(effects_by_unit, {1: 'puzzle', 3: 'shooter'})
+    assert table.loc[table['prophet'] == 'prophet_yearly', 'step_size'].isna().tolist() == [
+        False, True, False]
+
+
+def test_launch_effects_table_without_launches_returns_empty_table_with_columns():
+    """発売が1つも付かなければ（単位ごとの表がすべて空）、列だけを持つ空の表"""
+    empty = pd.DataFrame(columns=EFFECT_COLUMNS_OF_UNIT)
+    table = launch_effects_table({1: empty, 3: empty}, {1: 'puzzle', 3: 'shooter'})
+    assert (table.columns.tolist(), len(table)) == (LAUNCH_EFFECT_COLUMNS, 0)
+
+
+# ---------------------------------------------------------------- 勝ちの基準
+
+def _summary(wins):
+    """COMPARISONS の順に並べた、勝った単位数（4つ）から、summarize_comparisons と同じ形の表を作る（全59単位）"""
+    return pd.DataFrame({'prophet': [prophet for prophet, _ in COMPARISONS],
+                         'baseline': [baseline for _, baseline in COMPARISONS],
+                         'wins': wins, 'units': 59, 'median_ratio': 1.0})
+
+
+def test_check_win_criterion_reaches_when_both_baselines_hit_exactly_forty():
+    """比べる相手2つの両方にちょうど40単位で勝てば、届いた扱い"""
+    criterion = check_win_criterion(_summary([40, 40, 0, 0]))
+    assert criterion['reached'].tolist() == [True, False]
+
+
+@pytest.mark.parametrize('wins_mean, wins_recent', [(40, 39), (39, 40), (59, 0)])
+def test_check_win_criterion_does_not_reach_when_only_one_baseline_hits(wins_mean, wins_recent):
+    """片方の相手にしか40単位以上で勝てなければ、届かない"""
+    criterion = check_win_criterion(_summary([wins_mean, wins_recent, 0, 0]))
+    assert criterion['reached'].tolist() == [False, False]
+
+
+def test_check_win_criterion_judges_each_prophet_separately():
+    """Prophet の型ごとに判定する（年次季節性なしだけが届く場合）"""
+    criterion = check_win_criterion(_summary([39, 39, 45, 40]))
+    assert criterion['reached'].tolist() == [False, True]
+
+
+def test_check_win_criterion_required_wins_argument_changes_threshold():
+    """基準の単位数は引数で変えられる（30単位なら、30単位ちょうどで届く）"""
+    criterion = check_win_criterion(_summary([30, 30, 29, 30]), required_wins=30)
+    assert criterion['reached'].tolist() == [True, False]
+
+
+def test_check_win_criterion_gives_wins_units_and_required_wins():
+    """判定の根拠として、比べる相手ごとに勝った単位数・全単位数・基準の単位数を添える"""
+    criterion = check_win_criterion(_summary([11, 12, 18, 19]))
+    assert criterion.iloc[1][['wins_baseline_mean', 'wins_baseline_recent', 'units',
+                              'required_wins']].tolist() == [18, 19, 59, 40]
+
+
+def test_check_win_criterion_gives_one_row_per_prophet():
+    """Prophet の型ごとに1行（PROPHET_METHODS の順）"""
+    criterion = check_win_criterion(_summary([0, 0, 0, 0]))
+    assert criterion['prophet'].tolist() == list(PROPHET_METHODS)

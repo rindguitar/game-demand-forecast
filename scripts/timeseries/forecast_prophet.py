@@ -18,17 +18,25 @@ Prophet の予測が負になってもクリップしない（負になった数
 学ばせる（年次季節性が、1回きりの山を毎年の山として覚えるのを防ぐ）。
 比べる相手2つも、学習期間から発売後の週を除いて作る。出力先は既定で別のディレクトリになる。
 
+--launch-steps を付けると（--launch-events も有効になる）、発売を水準の段差としても渡す
+（発売が水準を押し上げたまま残る場合のため。Issue #60）。発売週が学習期間の最初の週より後の発売には、
+発売週から後を1とする説明変数（段差の印）を足す。比べる相手2つは、最新の発売の窓が終わった次の週
+から学習期間の最後までで作る。発売ごとの効き目を launch_effects.csv に書き、勝ちの基準の判定を出す。
+
 処理の流れ:
   1. 週次シェアを読み、全単位を同じ週で学習とテストに分ける
   2. （--launch-events のとき）レビューと台帳を読み、単位ごとに渡す発売を選ぶ
   3. 単位ごとに4つの方法で予測し、MAE と比を出す
-  4. forecasts.csv / metrics.csv / summary.csv（--launch-events のときは launch_events.csv も）を書く
+  4. forecasts.csv / metrics.csv / summary.csv（--launch-events のときは launch_events.csv も、
+     --launch-steps のときは launch_effects.csv も）を書く
   5. 4通りの比較（勝った単位数・比の中央値）と、負の予測の数を表示する
+     （--launch-steps のときは、段差の印の数と、勝ちの基準の判定も）
   6. 単位ごとの小さい図を並べる（--no-plot で省く）
 
 使い方:
     make forecast-prophet
     make forecast-prophet FORECAST_ARGS="--launch-events"
+    make forecast-prophet FORECAST_ARGS="--launch-steps"
     docker compose exec dev python scripts/timeseries/forecast_prophet.py
 """
 
@@ -45,6 +53,7 @@ from cmdstanpy.utils import get_logger
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.timeseries.forecast import (  # noqa: E402
+    BASELINE_METHODS,
     LAUNCH_MIN_SHARE,
     LAUNCH_MIN_WEEKLY_MENTIONS,
     LAUNCH_WEEKS,
@@ -52,9 +61,13 @@ from src.timeseries.forecast import (  # noqa: E402
     PROPHET_METHODS,
     RECENT_WEEKS,
     TEST_WEEKS,
+    WIN_CRITERION_UNITS,
     FitFallbackWarning,
+    check_win_criterion,
     evaluate_unit,
+    evaluate_unit_with_steps,
     find_target_launches,
+    launch_effects_table,
     launch_holidays,
     select_launch_events,
     split_train_test,
@@ -67,9 +80,10 @@ from src.visualization.timeseries_plots import plot_forecast_grid  # noqa: E402
 # 縦に長すぎるので、その半分ほどで分ける（64本なら2枚）
 UNITS_PER_PLOT = 30
 
-# 出力先の既定値。--launch-events のときは、発売を渡さない結果を上書きしないよう別にする
+# 出力先の既定値。--launch-events / --launch-steps のときは、それより前の結果を上書きしないよう別にする
 DEFAULT_OUTPUT_DIR = 'data/timeseries/forecast_64'
 LAUNCH_OUTPUT_DIR = 'data/timeseries/forecast_64_launch'
+STEP_OUTPUT_DIR = 'data/timeseries/forecast_64_launch_step'
 
 
 def parse_args():
@@ -86,6 +100,14 @@ def parse_args():
     parser.add_argument('--launch-events', action='store_true',
                         help='発売を Prophet に出来事（holidays）として渡す。比べる相手の学習期間からも'
                              '発売後の週を除く')
+    parser.add_argument('--launch-steps', action='store_true',
+                        help='発売を水準の段差としても渡す（--launch-events も有効になる）。'
+                             '発売週が学習期間の最初の週より後の発売に、発売週から後を1とする説明変数を足す。'
+                             '比べる相手は、最新の発売の窓が終わった次の週から学習期間の最後までで作る。'
+                             'launch_effects.csv を書き、勝ちの基準の判定を出す')
+    parser.add_argument('--win-criterion', type=int, default=WIN_CRITERION_UNITS,
+                        help='勝ちの基準。Prophet の型ごとに、比べる相手2つの両方に、この単位数以上で'
+                             '勝てば届いた扱い（--launch-steps のときだけ判定する。既定 %(default)s）')
     parser.add_argument('--reviews',
                         default='data/timeseries/reviews_timeseries_with_topics_64.csv',
                         help='トピック付与済みレビューCSV。--launch-events のときだけ読む'
@@ -102,14 +124,20 @@ def parse_args():
                              '（1週あたり。既定 %(default)s）')
     parser.add_argument('--output-dir', default=None,
                         help=f'出力先ディレクトリ（既定 {DEFAULT_OUTPUT_DIR}。'
-                             f'--launch-events のときは {LAUNCH_OUTPUT_DIR}）')
+                             f'--launch-events のときは {LAUNCH_OUTPUT_DIR}、'
+                             f'--launch-steps のときは {STEP_OUTPUT_DIR}）')
     parser.add_argument('--plot-weeks', type=int, default=52,
                         help='図に出す学習期間の週数。学習期間の最後からこの週数（既定 %(default)s）')
     parser.add_argument('--no-plot', action='store_true',
                         help='図を描かない')
     args = parser.parse_args()
+
+    # --launch-steps は --launch-events の上に重ねるので、付けたら --launch-events も有効にする
+    if args.launch_steps:
+        args.launch_events = True
     if args.output_dir is None:
-        args.output_dir = LAUNCH_OUTPUT_DIR if args.launch_events else DEFAULT_OUTPUT_DIR
+        args.output_dir = (STEP_OUTPUT_DIR if args.launch_steps
+                           else LAUNCH_OUTPUT_DIR if args.launch_events else DEFAULT_OUTPUT_DIR)
     return args
 
 
@@ -161,6 +189,25 @@ def print_summary(summary, forecasts_test):
               f"（{forecasts_test.loc[negative, 'unit'].nunique()}単位）")
 
 
+def print_step_counts(launch_effects):
+    """段差の印を付けた組・付けなかった組（単位 × 発売）の数を表示する"""
+    # Prophet の型で組の数は変わらないので、1つ目の型だけで数える
+    pairs = launch_effects[launch_effects['prophet'] == PROPHET_METHODS[0]]
+    with_step = int(pairs['has_step'].sum())
+    print(f"\n段差の印（--launch-steps）: 付けた組 {with_step} / 付けなかった組 {len(pairs) - with_step}"
+          f"（発売週が学習期間の最初の週以前の発売には付けない）")
+
+
+def print_win_criterion(criterion):
+    """勝ちの基準に届いたかを、Prophet の型ごとに表示する"""
+    required, units = criterion['required_wins'].iloc[0], criterion['units'].iloc[0]
+    print(f"\n勝ちの基準（比べる相手2つの両方に {required} / {units} 単位以上で勝つ）:")
+    for row in criterion.itertuples():
+        wins = '・'.join(f"{baseline} {getattr(row, f'wins_{baseline}')}"
+                        for baseline in BASELINE_METHODS)
+        print(f"  {row.prophet:<18}: {wins} → {'届いた' if row.reached else '届かない'}")
+
+
 def plot_forecasts(forecasts, keywords, args, cutoff, events=None):
     """単位ごとの小さい図を、UNITS_PER_PLOT 単位ずつ何枚かに分けて描く。events があれば発売の週も引く"""
     plot_dir = os.path.join(args.output_dir, 'plots')
@@ -210,17 +257,23 @@ def main():
     info = series.drop_duplicates('unit').set_index('unit')[['category', 'keywords']]
     train_by_unit = dict(tuple(train.groupby('unit')))
     test_by_unit = dict(tuple(test.groupby('unit')))
-    metrics_rows, prediction_frames, fallbacks = [], [], 0
+    metrics_rows, prediction_frames, effects_by_unit, fallbacks = [], [], {}, 0
     for done, unit in enumerate(units, start=1):
         # 発売が付かない単位は None（Prophet に holidays を渡さない）になる
         holidays = (launch_holidays(events, unit, args.launch_weeks)
                     if events is not None else None)
+        options = {'recent_weeks': args.recent_weeks, 'value_column': args.value_col,
+                   'holidays': holidays}
         # 警告（学習が時間内に終わらなかった等）は、どの単位かを添えてその場で表示する
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
-            unit_metrics, predictions = evaluate_unit(
-                train_by_unit[unit], test_by_unit[unit],
-                recent_weeks=args.recent_weeks, value_column=args.value_col, holidays=holidays)
+            # --launch-steps のときは、段差の印を渡し、発売の効き目も一緒に受け取る
+            if args.launch_steps:
+                unit_metrics, predictions, effects_by_unit[unit] = evaluate_unit_with_steps(
+                    train_by_unit[unit], test_by_unit[unit], **options)
+            else:
+                unit_metrics, predictions = evaluate_unit(
+                    train_by_unit[unit], test_by_unit[unit], **options)
         for item in caught:
             print(f"  ⚠️ t{unit}: {item.message}")
         fallbacks += sum(issubclass(item.category, FitFallbackWarning) for item in caught)
@@ -243,14 +296,21 @@ def main():
     tables = [('forecasts', forecasts), ('metrics', metrics), ('summary', summary)]
     if events is not None:
         tables.append(('launch_events', events))
+    if args.launch_steps:
+        launch_effects = launch_effects_table(effects_by_unit, info['keywords'])
+        tables.append(('launch_effects', launch_effects))
     print()
     for name, table in tables:
         path = os.path.join(args.output_dir, f'{name}.csv')
         table.to_csv(path, index=False)
         print(f"  ✅ 出力: {path}（{len(table):,}行）")
 
-    # 5. 4通りの比較と、負の予測の数を表示する
+    # 5. 4通りの比較と、負の予測の数を表示する（--launch-steps なら、段差の印の数と勝ちの基準の判定も）
+    if args.launch_steps:
+        print_step_counts(launch_effects)
     print_summary(summary, future)
+    if args.launch_steps:
+        print_win_criterion(check_win_criterion(summary, args.win_criterion))
     print(f"\nNewton 法に切り替えた学習: {fallbacks}回"
           f"（時間内に終わらなかったもの。ほかの学習は Prophet の既定のまま）")
 

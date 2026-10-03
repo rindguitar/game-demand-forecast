@@ -91,7 +91,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    FP["scripts/timeseries/<br/>forecast_prophet.py"] --> FC["timeseries/forecast.py<br/>分割・予測・当たり具合<br/>発売の選び方"]
+    FP["scripts/timeseries/<br/>forecast_prophet.py"] --> FC["timeseries/forecast.py<br/>分割・予測・当たり具合<br/>発売の選び方・段差の印"]
     FP --> WK["timeseries/weekly.py<br/>レビューに週の列を足す"]
     FP --> TP["visualization/<br/>timeseries_plots.py<br/>予測の図"]
 ```
@@ -238,7 +238,7 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。Pr
 | ファイル | 説明 |
 |---|---|
 | `weekly.py` | トピックの週次時系列を作る（件数・シェア・ポジ率・期待ポジ率・参加ゲーム数）。共通の期間と土台のゲームの決め方（3本のスクリプトの入口）もここに置く |
-| `forecast.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合（MAE）を比べる。発売を出来事（holidays）として渡すための、発売の選び方もここにある。ファイルの読み書きはしない純粋な関数だけ（Issue #41） |
+| `forecast.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合（MAE）を比べる。発売を出来事（holidays）や水準の段差の印として渡すための、発売の選び方・印の付け方・発売の効き目の読み取り・勝ちの基準の判定もここにある。ファイルの読み書きはしない純粋な関数だけ（Issue #41・#60） |
 
 充足度は**実際のポジ率とあわせて「期待ポジ率」も出します**。`voted_up` はゲーム全体への評価なので、
 トピックの絶対値だとそのゲームの評判を読んでしまうためです（→ `docs/decisions.md` 2026-09-07）。
@@ -289,20 +289,40 @@ NLP結果とプレイヤー数を組み合わせた需要予測フェーズ。Pr
   かつ件数が `min_weekly_mentions` × 期間の週数以上の（単位, 発売）の組を選ぶ。単位の集合に無いトピックは数えない
 - `launch_holidays(events, unit, launch_weeks)` — 1単位に渡す発売を Prophet の holidays にする（`holiday` = ゲーム名・
   `ds` = 発売週・`lower_window` = 0・`upper_window` = 7×(週数−1) 日）。発売が付かない単位は `None`（渡さない）
-- `forecast_prophet(train, weeks, yearly, holidays)` — Prophet で学習して、指定の週を予測する。`yearly` で年次季節性を
-  切り替える（ほかは既定値・負の予測もクリップしない）。`holidays` は渡したときだけ Prophet に渡す。
-  学習が `FIT_TIMEOUT_SECONDS` 秒で終わらなければ、`FitFallbackWarning` を出して、
-  同じ `holidays` のまま Newton 法で学び直す（Stan の L-BFGS が稀に終わらなくなるため）
+- `launch_steps(holidays, first_week)` — 1単位に渡した発売のうち、発売週が学習期間の最初の週より後のものに、
+  段差の印の列名（`step_0`, `step_1` …）を振る。`step / game / release_week` の表（ゲーム名との対応）を返す。
+  付ける発売が無ければ空
+- `with_step_columns(frame, steps)` — `ds` 列を持つ表に、段差の印の列を足す。発売週より前は0、発売週から後は
+  ずっと1（未来の週も1）。`steps` が `None` か空なら何も足さない
+- `fit_prophet(train, yearly, holidays, steps)` / `predict_prophet(model, weeks, steps)` — Prophet の学習と予測。
+  `yearly` で年次季節性を切り替える（ほかは既定値）。`holidays` は出来事、`steps` は `add_regressor` の説明変数として、
+  渡したときだけ Prophet に渡す。学習が `FIT_TIMEOUT_SECONDS` 秒で終わらなければ、`FitFallbackWarning` を出して、
+  同じ `holidays`・`steps` のまま Newton 法で学び直す（Stan の L-BFGS が稀に終わらなくなるため）
+- `forecast_prophet(train, weeks, yearly, holidays, steps)` — 上の学習と予測を続けて、指定の週の値を返す
+  （負の予測もクリップしない）
+- `read_launch_effects(model, train, holidays, steps)` — 学習した Prophet から、発売ごとの山の印の効き目の最大値
+  （`spike_peak`。8週の窓の中の holidays の成分の最大値）と、段差の印の係数（`step_size`。印が無い発売は空）を
+  読む。単位はシェア
 - `baseline_mean(train, horizon)` / `baseline_recent(train, horizon, recent_weeks)` — 比べる相手。
   学習期間の平均／欠測を除いた最後の `recent_weeks` 個の平均を、テスト週の数だけ並べる
 - `drop_holiday_weeks(train, holidays)` — 学習期間から、出来事の期間（`ds` + `lower_window` 日〜`ds` + `upper_window` 日）
   に入る週を除く。発売を渡す単位の比べる相手に、Prophet と同じ情報を渡すため。`holidays` が `None` なら何も除かず、
   除くと実績が1つも残らなければ止まる
+- `keep_weeks_after_latest_launch(train, holidays)` — 学習期間から、最新の発売の窓が終わった次の週以降だけを残す。
+  段差の印を渡す単位の比べる相手に使う（予測したい期間は印が1の状態なので、発売前の週は「いまのふだんの高さ」を
+  表さない）。段差の印を付けない発売も数える。`holidays` が `None` なら何も除かず、残る実績が無ければ止まる
 - `mae(actual, predicted)` / `mae_ratio(mae_prophet, mae_baseline)` — MAE と、`MAE(Prophet) ÷ MAE(比べる相手)`。
   比が1未満なら Prophet の勝ち。相手の MAE が0のときは、Prophet が外していれば `inf`、どちらも0なら `nan`
 - `evaluate_unit(train, test, recent_weeks, holidays)` — 1単位を4つの方法で予測し、`(MAE 4つと比 4つの dict, 予測の表)` を返す。`holidays` があれば Prophet に渡し、比べる相手はその期間の週を除いた学習期間から作る（`None` なら従来どおり）
+- `evaluate_unit_with_steps(train, test, recent_weeks, holidays)` — `evaluate_unit` の段差の印版。`(指標, 予測, 発売の効き目)`
+  を返す。Prophet に `holidays` と段差の印を渡し、比べる相手は `keep_weeks_after_latest_launch` の週で作り、
+  学習した Prophet から `read_launch_effects` で発売の効き目を読む。発売が付かない単位は `evaluate_unit` と同じ結果
 - `summarize_comparisons(metrics)` — 評価表から、4通りの比較（Prophet 2つ × 比べる相手 2つ）ごとに、
   勝った単位数・全単位数・比の中央値をまとめる。勝ちは比が1未満だけ（ちょうど1や欠測は勝ちにしない）
+- `launch_effects_table(effects_by_unit, keywords)` — 単位ごとの発売の効き目に、単位とキーワードを足して、
+  `launch_effects.csv` の形（`LAUNCH_EFFECT_COLUMNS`）にまとめる
+- `check_win_criterion(summary, required_wins)` — 勝ちの基準（Prophet の型ごとに、比べる相手2つの**両方**に
+  `required_wins`〔既定 `WIN_CRITERION_UNITS` = 40〕単位以上で勝つ。ちょうどでも届いた扱い）に届いたかを判定する
 
 ---
 
