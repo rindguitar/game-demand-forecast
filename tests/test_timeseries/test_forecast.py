@@ -6,6 +6,8 @@ Prophet そのものの出来は確かめない（実データで回して見る
 両方で回ることを確かめる。発売を出来事として渡す部分（発売の選び方・holidays の形・
 比べる相手が発売後の週を除くこと）も確かめる。発売を水準の段差としても渡す部分
 （段差の印の付け方・比べる相手の作り方・発売の効き目の表・勝ちの基準）も確かめる。
+テスト期間を見ずに Prophet の設定を選ぶ部分（確かめ用の期間の切り方・設定を選ぶ段階の発売の選び方・
+設定が Prophet に届くこと・試す設定の読み取り・設定ごとの成績と選び方）も確かめる。
 数値を厳密に確かめたいところは、Prophet を偽物に差し替える。
 """
 
@@ -20,15 +22,22 @@ from prophet import Prophet
 from src.timeseries import forecast
 from src.timeseries.forecast import (
     COMPARISONS,
+    CPS_GRID,
     LAUNCH_EFFECT_COLUMNS,
     METHODS,
+    PROPHET_DEFAULT_SETTINGS,
     PROPHET_METHODS,
+    SPS_GRID,
+    VALIDATION_WEEKS,
     FitFallbackWarning,
+    NoBaselineWeeksError,
     baseline_mean,
     baseline_recent,
     check_win_criterion,
+    choose_settings,
     drop_holiday_weeks,
     evaluate_unit,
+    evaluate_unit_settings,
     evaluate_unit_with_steps,
     find_target_launches,
     fit_prophet,
@@ -39,10 +48,15 @@ from src.timeseries.forecast import (
     launch_steps,
     mae,
     mae_ratio,
+    parse_grid,
+    prophet_settings_grid,
     read_launch_effects,
     select_launch_events,
+    selected_settings,
     split_train_test,
+    split_validation,
     summarize_comparisons,
+    summarize_settings,
     with_step_columns,
 )
 
@@ -118,6 +132,92 @@ def test_split_train_test_with_zero_test_weeks_raises():
     """テストが0週なら止まる"""
     with pytest.raises(ValueError):
         split_train_test(_weekly(range(5)), test_weeks=0)
+
+
+# ---------------------------------------------------------------- 確かめ用の期間の切り方
+
+# 20週の系列を、テストの切る週（16週目）で切ったときの、確かめ用の期間（11〜15週目の5週）を調べる
+TEST_CUTOFF = MONDAY + pd.Timedelta(weeks=16)
+
+
+def test_split_validation_takes_last_weeks_before_test_as_validation():
+    """テストの切る週より前の最後の validation_weeks 週が確かめ用の期間、その前が学ぶ期間になる"""
+    learn, validation, _ = split_validation(_weekly(range(20)), TEST_CUTOFF, validation_weeks=5)
+    assert (len(learn), len(validation)) == (11, 5)
+
+
+def test_split_validation_returns_first_validation_week_as_cutoff():
+    """確かめ用の切る週は、確かめ用の期間の最初の週"""
+    _, _, cutoff = split_validation(_weekly(range(20)), TEST_CUTOFF, validation_weeks=5)
+    assert cutoff == MONDAY + pd.Timedelta(weeks=11)
+
+
+def test_split_validation_does_not_include_test_weeks():
+    """学ぶ期間にも確かめ用の期間にも、テストの切る週以降の週は入らない。確かめ用の期間は、テストの直前の週まで"""
+    learn, validation, _ = split_validation(_weekly(range(20)), TEST_CUTOFF, validation_weeks=5)
+    assert max(learn['week'].max(), validation['week'].max()) == TEST_CUTOFF - pd.Timedelta(weeks=1)
+
+
+def test_split_validation_does_not_overlap():
+    """学ぶ期間は確かめ用の切る週より前、確かめ用の期間はその週から。同じ週が両方に入らない"""
+    learn, validation, cutoff = split_validation(_weekly(range(20)), TEST_CUTOFF,
+                                                 validation_weeks=5)
+    assert learn['week'].max() < cutoff <= validation['week'].min()
+
+
+def test_split_validation_ignores_values_in_test_period():
+    """テスト期間の値をどう変えても、学ぶ期間と確かめ用の期間は変わらない（設定を選ぶのにテストを見ない）"""
+    series = _weekly(np.arange(20, dtype=float))
+    changed = series.assign(share=np.where(series['week'] >= TEST_CUTOFF, 999.0, series['share']))
+    original = split_validation(series, TEST_CUTOFF, validation_weeks=5)[:2]
+    after = split_validation(changed, TEST_CUTOFF, validation_weeks=5)[:2]
+    assert [a.equals(b) for a, b in zip(original, after)] == [True, True]
+
+
+def test_split_validation_drops_missing_values_from_both():
+    """値が欠測の行は、学ぶ期間・確かめ用の期間とも除く"""
+    values = [0, 1, 2, np.nan, 4, 5, 6, 7, 8, 9, 10, 11, 12, np.nan, 14, 15, 16, 17, 18, 19]
+    learn, validation, _ = split_validation(_weekly(values), TEST_CUTOFF, validation_weeks=5)
+    assert (len(learn), len(validation)) == (10, 4)
+
+
+def test_split_validation_counts_missing_weeks_when_cutting():
+    """切る週は欠測の週も数えて決める（テストの直前の週が欠測でも、確かめ用の期間は5週ぶん）"""
+    values = [*range(15), np.nan, *range(16, 20)]
+    _, _, cutoff = split_validation(_weekly(values), TEST_CUTOFF, validation_weeks=5)
+    assert cutoff == MONDAY + pd.Timedelta(weeks=11)
+
+
+def test_split_validation_cuts_all_units_at_same_week():
+    """単位ごとに実績の末尾が違っても、全単位で同じ週で切る
+
+    単位 b は14週目以降の行が無い。単位ごとに数えると b だけ切る週が前にずれ、確かめ用の期間が5行になる。
+    """
+    unit_a = _weekly(range(20)).assign(unit='a')
+    unit_b = _weekly(range(14)).assign(unit='b')
+    _, validation, _ = split_validation(pd.concat([unit_a, unit_b]), TEST_CUTOFF,
+                                        validation_weeks=5)
+    assert len(validation[validation['unit'] == 'b']) == 3
+
+
+def test_split_validation_defaults_to_validation_weeks_constant():
+    """週数を省くと、VALIDATION_WEEKS（26週）になる"""
+    series = _weekly(range(60))
+    _, _, test_cutoff = split_train_test(series, test_weeks=10)
+    _, validation, _ = split_validation(series, test_cutoff)
+    assert (VALIDATION_WEEKS, len(validation)) == (26, 26)
+
+
+def test_split_validation_with_too_many_weeks_raises():
+    """学ぶ期間が残らないほど確かめ用の期間を長くしたら止まる（テストの前は16週）"""
+    with pytest.raises(ValueError):
+        split_validation(_weekly(range(20)), TEST_CUTOFF, validation_weeks=16)
+
+
+def test_split_validation_with_zero_weeks_raises():
+    """確かめ用の期間が0週なら止まる"""
+    with pytest.raises(ValueError):
+        split_validation(_weekly(range(20)), TEST_CUTOFF, validation_weeks=0)
 
 
 # ---------------------------------------------------------------- 発売の選び方
@@ -356,6 +456,75 @@ def test_select_launch_events_with_unreadable_release_date_raises():
     ledger = _games({'Alpha': 10, 'Old': -100}).assign(release_date=['2024-03-06', 'unknown'])
     with pytest.raises(ValueError):
         _select_events(_launch_reviews([10] * 8), ledger)
+
+
+# ---------------------------------------------------------------- 設定を選ぶ段階の発売の選び方
+
+def _stage_cutoffs():
+    """60週の系列を、テスト10週・確かめ用10週で切ったときの (データ期間の最初の週, 確かめ用の切る週, テストの切る週)
+
+    テストの切る週は50週目、確かめ用の切る週は40週目。
+    """
+    series = _weekly(range(60))
+    _, _, test_cutoff = split_train_test(series, test_weeks=10)
+    _, _, validation_cutoff = split_validation(series, test_cutoff, validation_weeks=10)
+    return series['week'].min(), validation_cutoff, test_cutoff
+
+
+@pytest.fixture
+def staged_launches():
+    """発売5本の台帳と、そのレビュー
+
+    Alpha（20週目）・Beta（38週目）・Gamma（40週目）・Delta（45週目）・Epsilon（50週目）。
+    それぞれ別のトピック（1〜5）に、発売週から8週、毎週10件のレビューがある。
+    """
+    launches = [('Alpha', 20), ('Beta', 38), ('Gamma', 40), ('Delta', 45), ('Epsilon', 50)]
+    games = _games(dict(launches))
+    reviews = pd.concat([_mentions(name, topic, week, [10] * 8)
+                         for topic, (name, week) in enumerate(launches, start=1)],
+                        ignore_index=True)
+    return games, reviews
+
+
+def test_tuning_stage_targets_only_launches_before_first_validation_week(staged_launches):
+    """設定を選ぶ段階（切る週 = 確かめ用の期間の最初の週 = 40週目）の対象は、発売週が40週目より前のゲームだけ
+
+    40週目に発売した Gamma も、確かめ用の期間のレビューを数えることになるので対象外。
+    """
+    games, _ = staged_launches
+    first_week, validation_cutoff, _ = _stage_cutoffs()
+    targets = find_target_launches(games, first_week, validation_cutoff)
+    assert targets['game'].tolist() == ['Alpha', 'Beta']
+
+
+def test_tuning_stage_selects_only_launches_before_first_validation_week(staged_launches):
+    """設定を選ぶ段階で選ぶ発売も、確かめ用の期間の最初の週より前のものだけ（Gamma・Delta・Epsilon は選ばない）"""
+    games, reviews = staged_launches
+    first_week, validation_cutoff, _ = _stage_cutoffs()
+    events = select_launch_events(reviews, games, range(1, 6), first_week, validation_cutoff)
+    assert events['game'].tolist() == ['Alpha', 'Beta']
+
+
+def test_tuning_stage_does_not_count_reviews_from_first_validation_week(staged_launches):
+    """確かめ用の期間の最初の週（40週目）以降のレビューは数えない
+
+    Beta（38週目に発売）は、8週ぶんの80件ではなく、40週目より前の2週ぶんの20件だけを数える。
+    """
+    games, reviews = staged_launches
+    first_week, validation_cutoff, _ = _stage_cutoffs()
+    events = select_launch_events(reviews, games, range(1, 6), first_week, validation_cutoff)
+    assert events.set_index('game')['game_mentions'].to_dict() == {'Alpha': 80, 'Beta': 20}
+
+
+def test_test_stage_still_selects_launches_in_validation_period(staged_launches):
+    """測るとき（切る週 = テストの最初の週 = 50週目）は、確かめ用の期間に発売した Gamma・Delta も選ぶ
+
+    設定を選ぶ段階だけが、確かめ用の期間の最初の週で切って選び直される。Epsilon（50週目）はテスト期間の発売なので、どちらでも選ばない。
+    """
+    games, reviews = staged_launches
+    first_week, _, test_cutoff = _stage_cutoffs()
+    events = select_launch_events(reviews, games, range(1, 6), first_week, test_cutoff)
+    assert events['game'].tolist() == ['Alpha', 'Beta', 'Gamma', 'Delta']
 
 
 # ---------------------------------------------------------------- Prophet に渡す発売（holidays）
@@ -636,6 +805,12 @@ def test_keep_weeks_after_latest_launch_without_holidays_returns_train_as_is():
 def test_keep_weeks_after_latest_launch_with_no_weeks_left_raises():
     """窓の後の週が1つも残らなければ止まる（4週目に発売で窓が4・5・6週目なら、6週の学習期間には残らない）"""
     with pytest.raises(ValueError):
+        keep_weeks_after_latest_launch(_weekly(range(6)), _holidays(('Alpha', 4)))
+
+
+def test_keep_weeks_after_latest_launch_with_no_weeks_left_raises_no_baseline_weeks_error():
+    """止まるときのエラーは NoBaselineWeeksError（ValueError の一種）。呼び出し側がほかの ValueError と見分けるため"""
+    with pytest.raises(NoBaselineWeeksError):
         keep_weeks_after_latest_launch(_weekly(range(6)), _holidays(('Alpha', 4)))
 
 
@@ -1095,6 +1270,168 @@ def test_read_launch_effects_without_holidays_returns_empty_table_with_columns()
         ['game', 'release_week', 'has_step', 'spike_peak', 'step_size'], 0)
 
 
+# ---------------------------------------------------------------- Prophet の設定（曲がりやすさ・季節性の効き具合）
+
+SETTINGS = {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 1.0}
+
+
+def test_forecast_prophet_passes_settings_to_prophet(recorded_prophet):
+    """渡した設定（トレンドの曲がりやすさ・季節性の効き具合）が、Prophet にそのまま届く"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True, settings=SETTINGS)
+    created = recorded_prophet[0]
+    assert (created['changepoint_prior_scale'], created['seasonality_prior_scale']) == (0.01, 1.0)
+
+
+def test_forecast_prophet_without_settings_passes_no_prior_scale_to_prophet(recorded_prophet):
+    """設定を渡さなければ、Prophet にも渡さない（Prophet の既定値のまま）"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=True)
+    assert {'changepoint_prior_scale', 'seasonality_prior_scale'}.isdisjoint(recorded_prophet[0])
+
+
+def test_forecast_prophet_passes_only_the_settings_given(recorded_prophet):
+    """渡した設定だけを Prophet に渡す（年次季節性なしの型には、季節性の効き具合を渡さない）"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    forecast_prophet(train, test['week'], yearly=False, settings={'changepoint_prior_scale': 0.5})
+    created = recorded_prophet[0]
+    assert created['changepoint_prior_scale'] == 0.5
+    assert 'seasonality_prior_scale' not in created
+
+
+def test_forecast_prophet_timeout_refit_keeps_settings(monkeypatch):
+    """学習が時間切れになって Newton 法で学び直すときも、同じ設定を渡す"""
+    created = []
+
+    class Stub:
+        def __init__(self, **kwargs):
+            created.append(kwargs['changepoint_prior_scale'])
+
+        def fit(self, history, **options):
+            if options.get('algorithm') != 'Newton':
+                raise TimeoutError
+            return self
+
+        def predict(self, future):
+            return pd.DataFrame({'ds': future['ds'], 'yhat': np.zeros(len(future))})
+
+    monkeypatch.setattr(forecast, 'Prophet', Stub)
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    with pytest.warns(FitFallbackWarning):
+        forecast_prophet(train, test['week'], yearly=False, settings=SETTINGS)
+    assert created == [0.01, 0.01]
+
+
+def test_prophet_default_settings_are_prophets_own_defaults():
+    """同点のとき近さを測る基準 PROPHET_DEFAULT_SETTINGS は、Prophet の既定値そのもの"""
+    default = Prophet()
+    assert PROPHET_DEFAULT_SETTINGS == {
+        'changepoint_prior_scale': default.changepoint_prior_scale,
+        'seasonality_prior_scale': default.seasonality_prior_scale}
+
+
+def test_forecast_prophet_changepoint_scale_changes_forecast():
+    """トレンドの曲がりやすさを変えると、予測が変わる（設定が本物の Prophet の学習に届いている）
+
+    70週目でトレンドが上りから下りに折れる系列。曲がりにくい設定と曲がりやすい設定で、折れの扱いが変わる。
+    """
+    series = _weekly(np.concatenate([np.linspace(0.02, 0.05, 70), np.linspace(0.05, 0.03, 48)]))
+    train, test = series.iloc[:110], series.iloc[110:]
+    stiff = forecast_prophet(train, test['week'], yearly=False,
+                             settings={'changepoint_prior_scale': 0.001})
+    flexible = forecast_prophet(train, test['week'], yearly=False,
+                                settings={'changepoint_prior_scale': 0.5})
+    assert not np.allclose(stiff, flexible)
+
+
+def test_forecast_prophet_seasonality_scale_changes_yearly_forecast():
+    """年次季節性ありでは、季節性の効き具合を変えると予測が変わる（弱いと波を覚えにくい）"""
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    weak = forecast_prophet(train, test['week'], yearly=True,
+                            settings={'seasonality_prior_scale': 0.001})
+    strong = forecast_prophet(train, test['week'], yearly=True,
+                              settings={'seasonality_prior_scale': 10.0})
+    assert not np.allclose(weak, strong)
+
+
+def test_forecast_prophet_seasonality_scale_does_not_affect_no_yearly_forecast():
+    """年次季節性なしでは、季節性の効き具合を渡しても予測が変わらない
+
+    なしの型の候補を、トレンドの曲がりやすさだけにしてよい理由。出来事（holidays）と段差の印を渡していても同じ。
+    """
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    holidays = _holidays(('Alpha', 60), upper_window=49)
+    steps = launch_steps(holidays, train['week'].min())
+    default = forecast_prophet(train, test['week'], yearly=False, holidays=holidays, steps=steps)
+    changed = forecast_prophet(train, test['week'], yearly=False, holidays=holidays, steps=steps,
+                               settings={'seasonality_prior_scale': 0.001})
+    assert changed.tolist() == default.tolist()
+
+
+# ---------------------------------------------------------------- 試す設定（グリッド）
+
+def test_default_grids_are_the_documented_values():
+    """試す設定の既定値は、曲がりやすさ 0.001・0.01・0.05・0.5、効き具合 0.01・0.1・1・10"""
+    assert (CPS_GRID, SPS_GRID) == ((0.001, 0.01, 0.05, 0.5), (0.01, 0.1, 1.0, 10.0))
+
+
+def test_parse_grid_reads_comma_separated_numbers():
+    """カンマ区切りの数を、タプルにする"""
+    assert parse_grid('0.001,0.01,0.05,0.5') == (0.001, 0.01, 0.05, 0.5)
+
+
+def test_parse_grid_keeps_given_order():
+    """並びは、渡した順のまま（大きい順などに並べ替えない）"""
+    assert parse_grid('0.5,0.01,0.1') == (0.5, 0.01, 0.1)
+
+
+@pytest.mark.parametrize('text, expected', [(' 0.1 , 1 ', (0.1, 1.0)), ('10', (10.0,)),
+                                            ('1e-3,1E1', (0.001, 10.0))])
+def test_parse_grid_accepts_spaces_single_value_and_exponent(text, expected):
+    """空白・値が1つだけ・指数表記も読める"""
+    assert parse_grid(text) == expected
+
+
+@pytest.mark.parametrize('text', ['', 'a,b', '0.1,', ',', '0.1;1', '0.1 0.2'])
+def test_parse_grid_with_unreadable_text_raises(text):
+    """数でない・空の要素がある・区切りがカンマでない、のときは止まる"""
+    with pytest.raises(ValueError):
+        parse_grid(text)
+
+
+@pytest.mark.parametrize('text', ['0', '-0.1', 'nan', 'inf', '0.1,0'])
+def test_parse_grid_with_non_positive_or_non_finite_value_raises(text):
+    """0以下・有限でない値は止まる（事前分布の大きさは正の数）"""
+    with pytest.raises(ValueError):
+        parse_grid(text)
+
+
+@pytest.mark.parametrize('text', ['0.1,0.1', '0.1,0.5,0.10'])
+def test_parse_grid_with_duplicate_value_raises(text):
+    """同じ値が重なっていたら止まる（同じ設定を二重に数えると、勝った単位数が膨らむため）"""
+    with pytest.raises(ValueError):
+        parse_grid(text)
+
+
+def test_prophet_settings_grid_for_yearly_has_every_combination_changepoint_outside():
+    """年次季節性ありは、曲がりやすさ × 効き具合の全組み合わせ。曲がりやすさが外側（同じ曲がりやすさを続けて並べる）"""
+    grid = prophet_settings_grid('prophet_yearly', (0.1, 0.2), (1.0, 2.0, 3.0))
+    assert [(setting['changepoint_prior_scale'], setting['seasonality_prior_scale'])
+            for setting in grid] == [(0.1, 1.0), (0.1, 2.0), (0.1, 3.0),
+                                     (0.2, 1.0), (0.2, 2.0), (0.2, 3.0)]
+
+
+def test_prophet_settings_grid_for_no_yearly_has_only_changepoint_scale():
+    """年次季節性なしは、曲がりやすさだけ（季節性の効き具合は渡さない）"""
+    grid = prophet_settings_grid('prophet_no_yearly', (0.1, 0.2), (1.0, 2.0, 3.0))
+    assert grid == [{'changepoint_prior_scale': 0.1}, {'changepoint_prior_scale': 0.2}]
+
+
+def test_prophet_settings_grid_defaults_to_sixteen_and_four_settings():
+    """既定のグリッドでは、年次季節性ありが4 × 4 = 16通り、なしが4通り"""
+    assert [len(prophet_settings_grid(method)) for method in PROPHET_METHODS] == [16, 4]
+
+
 # ---------------------------------------------------------------- 1単位の評価
 
 @pytest.fixture
@@ -1256,8 +1593,9 @@ def fake_step_fits(monkeypatch):
     calls = []
 
     def fake_fit(train, yearly, week_column='week', value_column='share', fit_timeout=None,
-                 holidays=None, steps=None):
-        calls.append({'train': train, 'yearly': yearly, 'holidays': holidays, 'steps': steps})
+                 holidays=None, steps=None, settings=None):
+        calls.append({'train': train, 'yearly': yearly, 'holidays': holidays, 'steps': steps,
+                      'settings': settings})
         return yearly
 
     def fake_predict(model, weeks, steps=None):
@@ -1421,6 +1759,200 @@ def test_evaluate_unit_with_steps_without_holidays_returns_empty_effects():
     """発売が付かない単位（holidays が None）の発売の効き目は、空の表（本物の Prophet で確かめる）"""
     _, _, effects = evaluate_unit_with_steps(_seasonal(110), _seasonal(8, first_week=110))
     assert effects.empty
+
+
+def test_evaluate_unit_with_steps_passes_each_prophet_its_own_settings(fake_step_fits, unit_data):
+    """選んだ設定は、Prophet の型ごとに、その型の学習にだけ渡す（年次季節性あり → なし の順）"""
+    settings = {'prophet_yearly': SETTINGS, 'prophet_no_yearly': {'changepoint_prior_scale': 0.5}}
+    evaluate_unit_with_steps(*unit_data, prophet_settings=settings)
+    assert [call['settings'] for call in fake_step_fits] == [
+        SETTINGS, {'changepoint_prior_scale': 0.5}]
+
+
+def test_evaluate_unit_with_steps_without_settings_passes_none_to_both_fits(fake_step_fits,
+                                                                            unit_data):
+    """設定を渡さなければ、どちらの学習にも設定を渡さない（これまでと同じ）"""
+    evaluate_unit_with_steps(*unit_data)
+    assert [call['settings'] for call in fake_step_fits] == [None, None]
+
+
+def test_evaluate_unit_with_steps_passes_none_to_prophet_missing_from_settings(fake_step_fits,
+                                                                               unit_data):
+    """設定に入っていない型の学習には、設定を渡さない"""
+    evaluate_unit_with_steps(*unit_data, prophet_settings={'prophet_no_yearly': SETTINGS})
+    assert [call['settings'] for call in fake_step_fits] == [None, SETTINGS]
+
+
+def test_evaluate_unit_with_steps_settings_change_only_that_prophet_with_real_prophet():
+    """本物の Prophet で、年次季節性なしの設定を変えると、年次季節性なしの予測だけが変わる
+
+    年次季節性ありの予測と、比べる相手2つは変わらない（設定が正しい型に届いていることの確認）。
+    """
+    train, test = _seasonal(110), _seasonal(8, first_week=110)
+    holidays = _holidays(('Alpha', 60), upper_window=49)
+    _, default, _ = evaluate_unit_with_steps(train, test, holidays=holidays)
+    _, changed, _ = evaluate_unit_with_steps(
+        train, test, holidays=holidays,
+        prophet_settings={'prophet_no_yearly': {'changepoint_prior_scale': 0.001}})
+    assert [changed[method].tolist() == default[method].tolist() for method in METHODS] == [
+        True, False, True, True]
+
+
+# ---------------------------------------------------------------- 1単位の設定ごとの評価（確かめ用の期間）
+
+@pytest.fixture
+def fake_setting_fits(monkeypatch):
+    """Prophet の学習・予測を、設定から決まる一定の値を予測する偽物に差し替え、学習のたびの引数を記録する
+
+    学習したモデルの代わりに設定を返し、予測は「曲がりやすさ + 0.1 × 効き具合（無ければ0）」の一定値。
+    MAE と比を厳密に確かめるため。
+    """
+    calls = []
+
+    def fake_fit(train, yearly, week_column='week', value_column='share', fit_timeout=None,
+                 holidays=None, steps=None, settings=None):
+        calls.append({'train': train, 'yearly': yearly, 'holidays': holidays, 'steps': steps,
+                      'settings': settings})
+        return settings
+
+    def fake_predict(model, weeks, steps=None):
+        level = model['changepoint_prior_scale'] + 0.1 * model.get('seasonality_prior_scale', 0)
+        return np.full(len(weeks), level)
+
+    monkeypatch.setattr(forecast, 'fit_prophet', fake_fit)
+    monkeypatch.setattr(forecast, 'predict_prophet', fake_predict)
+    return calls
+
+
+# 試す設定は、曲がりやすさ 0.3・0.6 と、効き具合 1・2。偽の予測は、年次季節性ありが 0.4・0.5・0.7・0.8、なしが 0.3・0.6
+GRID_OPTIONS = {'cps_grid': (0.3, 0.6), 'sps_grid': (1.0, 2.0), 'recent_weeks': 2}
+
+# unit_data の確かめ週（0.5, 0.7）での、偽の予測 6つの MAE ÷ 比べる相手の MAE。
+# 比べる相手の MAE は、平均（0.35）が 0.25、直近2週の平均（0.55）が 0.1
+RATIO_VS_MEAN = [0.8, 0.4, 0.4, 0.8, 1.2, 0.4]
+RATIO_VS_RECENT = [2.0, 1.0, 1.0, 2.0, 3.0, 1.0]
+
+
+def test_evaluate_unit_settings_returns_documented_columns(fake_setting_fits, unit_data):
+    """列は prophet / 設定2つ（曲がりやすさ・効き具合）/ ratio_baseline_mean / ratio_baseline_recent"""
+    results = evaluate_unit_settings(*unit_data, **GRID_OPTIONS)
+    assert results.columns.tolist() == ['prophet', 'changepoint_prior_scale',
+                                        'seasonality_prior_scale', 'ratio_baseline_mean',
+                                        'ratio_baseline_recent']
+
+
+def test_evaluate_unit_settings_gives_one_row_per_prophet_and_setting(fake_setting_fits,
+                                                                      unit_data):
+    """年次季節性あり（2 × 2 = 4通り）→ なし（曲がりやすさの2通り）の順に、6行"""
+    results = evaluate_unit_settings(*unit_data, **GRID_OPTIONS)
+    assert list(zip(results['prophet'], results['changepoint_prior_scale'],
+                    results['seasonality_prior_scale'].fillna(-1))) == [
+        ('prophet_yearly', 0.3, 1.0), ('prophet_yearly', 0.3, 2.0),
+        ('prophet_yearly', 0.6, 1.0), ('prophet_yearly', 0.6, 2.0),
+        ('prophet_no_yearly', 0.3, -1), ('prophet_no_yearly', 0.6, -1)]
+
+
+def test_evaluate_unit_settings_uses_default_grids(fake_setting_fits, unit_data):
+    """グリッドを省くと既定の設定を試す（年次季節性あり16通り・なし4通り）"""
+    results = evaluate_unit_settings(*unit_data, recent_weeks=2)
+    assert results['prophet'].value_counts().to_dict() == {'prophet_yearly': 16,
+                                                           'prophet_no_yearly': 4}
+
+
+def test_evaluate_unit_settings_gives_ratio_of_prophet_mae_to_each_baseline(fake_setting_fits,
+                                                                            unit_data):
+    """比 = MAE(Prophet) ÷ MAE(比べる相手)。比べる相手2つのそれぞれについて出す"""
+    results = evaluate_unit_settings(*unit_data, **GRID_OPTIONS)
+    assert results['ratio_baseline_mean'].tolist() == pytest.approx(RATIO_VS_MEAN)
+    assert results['ratio_baseline_recent'].tolist() == pytest.approx(RATIO_VS_RECENT)
+
+
+def test_evaluate_unit_settings_passes_each_setting_to_its_prophet_fit(fake_setting_fits,
+                                                                       unit_data):
+    """設定を、型ごとに順に学習へ渡す。年次季節性なしの学習には、季節性の効き具合を渡さない"""
+    evaluate_unit_settings(*unit_data, **GRID_OPTIONS)
+    assert [(call['yearly'], call['settings']) for call in fake_setting_fits] == [
+        (True, {'changepoint_prior_scale': 0.3, 'seasonality_prior_scale': 1.0}),
+        (True, {'changepoint_prior_scale': 0.3, 'seasonality_prior_scale': 2.0}),
+        (True, {'changepoint_prior_scale': 0.6, 'seasonality_prior_scale': 1.0}),
+        (True, {'changepoint_prior_scale': 0.6, 'seasonality_prior_scale': 2.0}),
+        (False, {'changepoint_prior_scale': 0.3}),
+        (False, {'changepoint_prior_scale': 0.6})]
+
+
+def test_evaluate_unit_settings_gives_prophet_whole_learning_period(fake_setting_fits, unit_data):
+    """Prophet には、発売後の週を除かない学ぶ期間をそのまま渡す（除くのは比べる相手だけ）"""
+    train, validation = unit_data
+    evaluate_unit_settings(train, validation, holidays=_holidays(('Alpha', 2)), **GRID_OPTIONS)
+    assert all(call['train'] is train for call in fake_setting_fits)
+
+
+def test_evaluate_unit_settings_passes_holidays_and_steps_to_every_fit(fake_setting_fits,
+                                                                       unit_data):
+    """山の印（holidays）と段差の印は、型・設定によらず、すべての学習に同じものを渡す"""
+    holidays = _holidays(('Alpha', 2))
+    evaluate_unit_settings(*unit_data, holidays=holidays, **GRID_OPTIONS)
+    assert all(call['holidays'] is holidays and call['steps']['step'].tolist() == ['step_0']
+               for call in fake_setting_fits)
+
+
+def test_evaluate_unit_settings_baselines_use_weeks_after_latest_launch(fake_setting_fits,
+                                                                        unit_data):
+    """比べる相手は、最新の発売の窓（2〜4週目）が終わった次の週（5週目の0.6）だけで作る
+
+    平均も直近の平均も0.6になり、MAE は0.1。比は、偽の予測の MAE ÷ 0.1 になる。
+    """
+    results = evaluate_unit_settings(*unit_data, holidays=_holidays(('Alpha', 2)), **GRID_OPTIONS)
+    expected = pytest.approx([2.0, 1.0, 1.0, 2.0, 3.0, 1.0])
+    assert (results['ratio_baseline_mean'].tolist(),
+            results['ratio_baseline_recent'].tolist()) == (expected, expected)
+
+
+def test_evaluate_unit_settings_with_no_weeks_after_latest_launch_raises(fake_setting_fits,
+                                                                         unit_data):
+    """最新の発売の窓（5〜7週目）が学ぶ期間の終わり（5週目）を越えて続くと、比べる相手を作れないので止まる
+
+    呼び出し側は NoBaselineWeeksError だけを受けて、その単位を設定を選ぶ段階から外す。
+    """
+    with pytest.raises(NoBaselineWeeksError):
+        evaluate_unit_settings(*unit_data, holidays=_holidays(('Alpha', 5)), **GRID_OPTIONS)
+
+
+def test_evaluate_unit_settings_with_no_weeks_after_latest_launch_fits_nothing(fake_setting_fits,
+                                                                               unit_data):
+    """比べる相手を作れないときは、Prophet を1回も学習しないうちに止まる（無駄に学習しない）"""
+    with pytest.raises(NoBaselineWeeksError):
+        evaluate_unit_settings(*unit_data, holidays=_holidays(('Alpha', 5)), **GRID_OPTIONS)
+    assert fake_setting_fits == []
+
+
+def test_evaluate_unit_settings_gives_inf_or_nan_when_baseline_mae_is_zero(fake_setting_fits):
+    """比べる相手の MAE が0のときは割れない。Prophet が外せば inf、Prophet も0なら nan（どちらも勝ちにならない）
+
+    値がずっと0.5の系列では、比べる相手2つは MAE 0。偽の予測が0.5になる設定（曲がりやすさ0.5）は nan、0.6は inf。
+    """
+    train, validation = _weekly([0.5] * 6), _weekly([0.5, 0.5], first_week=6)
+    results = evaluate_unit_settings(train, validation, cps_grid=(0.5, 0.6), sps_grid=(0.0,),
+                                     recent_weeks=2)
+    ratios = results['ratio_baseline_mean']
+    assert (ratios.isna().tolist(), np.isinf(ratios).tolist()) == (
+        [True, False, True, False], [False, True, False, True])
+
+
+def test_evaluate_unit_settings_without_validation_values_raises(fake_setting_fits, unit_data):
+    """確かめ用の期間に実績が1つも無ければ止まる"""
+    train, validation = unit_data
+    with pytest.raises(ValueError):
+        evaluate_unit_settings(train, validation.iloc[:0], **GRID_OPTIONS)
+
+
+def test_evaluate_unit_settings_with_prophet_returns_finite_ratios():
+    """本物の Prophet で（合成データ1単位・学習110週・確かめ8週。60週目に発売）、全設定の比が有限の値で返る"""
+    results = evaluate_unit_settings(
+        _seasonal(110), _seasonal(8, first_week=110), cps_grid=(0.01, 0.5), sps_grid=(1.0, 10.0),
+        holidays=_holidays(('Alpha', 60), upper_window=49))
+    assert len(results) == 6
+    assert np.isfinite(results[['ratio_baseline_mean', 'ratio_baseline_recent']]).all().all()
 
 
 # ---------------------------------------------------------------- まとめ
@@ -1595,3 +2127,234 @@ def test_check_win_criterion_gives_one_row_per_prophet():
     """Prophet の型ごとに1行（PROPHET_METHODS の順）"""
     criterion = check_win_criterion(_summary([0, 0, 0, 0]))
     assert criterion['prophet'].tolist() == list(PROPHET_METHODS)
+
+
+# ---------------------------------------------------------------- 設定ごとの成績のまとめと、設定の選び方
+
+SETTING_RESULT_COLUMNS = ['unit', 'prophet', 'changepoint_prior_scale', 'seasonality_prior_scale',
+                          'ratio_baseline_mean', 'ratio_baseline_recent']
+
+
+@pytest.fixture
+def setting_results():
+    """3単位 × 設定3つ（年次季節性あり2つ・なし1つ）の比を、単位ごとの結果を積んだ形で並べた表
+
+    年次季節性あり（0.01・1）は、平均との比が [0.5, 0.9, 1.0]・直近との比が [1.5, 0.8, 2.0]。
+    年次季節性あり（0.5・1）は、平均との比が [1.2, 1.1, 欠測]・直近との比が [0.5, 0.6, 0.7]。
+    年次季節性なし（0.05）は、どちらとの比も [0.4, 0.4, 2.0]（季節性の効き具合は欠測）。
+    """
+    return pd.DataFrame([
+        (1, 'prophet_yearly', 0.01, 1.0, 0.5, 1.5),
+        (2, 'prophet_yearly', 0.01, 1.0, 0.9, 0.8),
+        (3, 'prophet_yearly', 0.01, 1.0, 1.0, 2.0),
+        (1, 'prophet_yearly', 0.5, 1.0, 1.2, 0.5),
+        (2, 'prophet_yearly', 0.5, 1.0, 1.1, 0.6),
+        (3, 'prophet_yearly', 0.5, 1.0, np.nan, 0.7),
+        (1, 'prophet_no_yearly', 0.05, np.nan, 0.4, 0.4),
+        (2, 'prophet_no_yearly', 0.05, np.nan, 0.4, 0.4),
+        (3, 'prophet_no_yearly', 0.05, np.nan, 2.0, 2.0)], columns=SETTING_RESULT_COLUMNS)
+
+
+def test_summarize_settings_has_documented_columns(setting_results):
+    """列は、型・設定2つ・数えた単位数・勝った単位数2つ・min・比の中央値2つ"""
+    assert summarize_settings(setting_results).columns.tolist() == [
+        'prophet', 'changepoint_prior_scale', 'seasonality_prior_scale', 'units',
+        'wins_baseline_mean', 'wins_baseline_recent', 'min_wins',
+        'median_ratio_baseline_mean', 'median_ratio_baseline_recent']
+
+
+def test_summarize_settings_gives_one_row_per_prophet_and_setting_in_given_order(setting_results):
+    """型 × 設定ごとに1行。年次季節性なしの設定（効き具合が欠測）も落とさない"""
+    summary = summarize_settings(setting_results)
+    assert list(zip(summary['prophet'], summary['changepoint_prior_scale'],
+                    summary['seasonality_prior_scale'].fillna(-1))) == [
+        ('prophet_yearly', 0.01, 1.0), ('prophet_yearly', 0.5, 1.0),
+        ('prophet_no_yearly', 0.05, -1)]
+
+
+def test_summarize_settings_counts_wins_below_one_for_each_baseline(setting_results):
+    """比が1未満の単位を、比べる相手ごとに勝ちと数える（ちょうど1・欠測は勝ちにしない）"""
+    summary = summarize_settings(setting_results)
+    assert summary[['wins_baseline_mean', 'wins_baseline_recent']].values.tolist() == [
+        [2, 1], [0, 3], [2, 2]]
+
+
+def test_summarize_settings_units_counts_units_evaluated_for_each_setting(setting_results):
+    """units は、その設定で比を出した単位の数（比が欠測の単位も数える。外した単位は数えない）"""
+    summary = summarize_settings(setting_results.query('unit != 2'))
+    assert summary['units'].tolist() == [2, 2, 2]
+
+
+def test_summarize_settings_min_wins_is_smaller_of_two_win_counts(setting_results):
+    """min は、比べる相手2つに勝った単位数の小さい方"""
+    assert summarize_settings(setting_results)['min_wins'].tolist() == [1, 0, 2]
+
+
+def test_summarize_settings_gives_median_ratio_skipping_missing(setting_results):
+    """比の中央値を、比べる相手ごとに出す（欠測は除く）"""
+    summary = summarize_settings(setting_results)
+    assert summary['median_ratio_baseline_mean'].tolist() == pytest.approx([0.9, 1.15, 0.4])
+    assert summary['median_ratio_baseline_recent'].tolist() == pytest.approx([1.5, 0.6, 0.4])
+
+
+def _summary_rows(*rows):
+    """(型, 曲がりやすさ, 効き具合, 平均に勝った数, 直近に勝った数, 平均との比の中央値, 直近との比の中央値) から、
+    summarize_settings と同じ形の表を作る"""
+    return pd.DataFrame([
+        {'prophet': prophet, 'changepoint_prior_scale': cps, 'seasonality_prior_scale': sps,
+         'units': 59, 'wins_baseline_mean': wins_mean, 'wins_baseline_recent': wins_recent,
+         'min_wins': min(wins_mean, wins_recent),
+         'median_ratio_baseline_mean': median_mean, 'median_ratio_baseline_recent': median_recent}
+        for prophet, cps, sps, wins_mean, wins_recent, median_mean, median_recent in rows])
+
+
+def _picked(table, prophet='prophet_yearly'):
+    """選ばれた設定（曲がりやすさ, 効き具合）。型ごとに1つ"""
+    row = table[table['selected'] & (table['prophet'] == prophet)].iloc[0]
+    return row['changepoint_prior_scale'], row['seasonality_prior_scale']
+
+
+def test_choose_settings_picks_largest_min_wins():
+    """2つの勝ち数の小さい方（min）がいちばん大きい設定を選ぶ。合計が大きくても、片方が低ければ選ばない"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 30, 30, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 1.0, 50, 29, 0.5, 0.5))
+    assert _picked(choose_settings(summary)) == (0.01, 1.0)
+
+
+def test_choose_settings_breaks_min_wins_tie_by_smaller_average_of_medians():
+    """min が同点なら、2つの比の中央値の平均が小さい方"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 30, 35, 1.0, 1.1),
+                            ('prophet_yearly', 0.5, 1.0, 30, 31, 0.9, 1.0))
+    assert _picked(choose_settings(summary)) == (0.5, 1.0)
+
+
+def test_choose_settings_median_average_uses_both_medians():
+    """中央値は2つの平均で比べる（片方の中央値が小さいだけでは勝たない）
+
+    0.01 は平均との比が小さい（0.8）が、直近との比が大きい（1.4）ので、平均は1.1。0.5 は平均 0.95。
+    """
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 30, 30, 0.8, 1.4),
+                            ('prophet_yearly', 0.5, 1.0, 30, 30, 0.9, 1.0))
+    assert _picked(choose_settings(summary)) == (0.5, 1.0)
+
+
+def test_choose_settings_ranks_missing_median_last():
+    """中央値が欠測の設定は、同点の中でいちばん後ろ（欠測を小さいと見なして選ばない）"""
+    summary = _summary_rows(('prophet_yearly', 0.05, 10.0, 30, 30, np.nan, np.nan),
+                            ('prophet_yearly', 0.5, 1.0, 30, 30, 5.0, 5.0))
+    assert _picked(choose_settings(summary)) == (0.5, 1.0)
+
+
+def test_choose_settings_breaks_remaining_tie_by_closeness_to_prophet_default_on_log_scale():
+    """min も中央値の平均も同点なら、Prophet の既定値（曲がりやすさ0.05）に近い方。近さは比の対数で測る
+
+    0.001 は既定値との差が絶対値では小さい（0.049）が、比では1.7桁離れている。0.5 は差0.45でも1桁なので、0.5 が近い。
+    """
+    summary = _summary_rows(('prophet_yearly', 0.001, 10.0, 30, 30, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 10.0, 30, 30, 1.0, 1.0))
+    assert _picked(choose_settings(summary)) == (0.5, 10.0)
+
+
+def test_choose_settings_closeness_adds_seasonality_scale_distance():
+    """近さは、曲がりやすさと効き具合の両方の遠さを足す
+
+    (0.05, 1) は曲がりやすさが既定値どおりでも、効き具合が1桁違う（遠さ1）。(0.01, 10) は曲がりやすさが
+    0.7桁違うだけ（遠さ0.7）なので、(0.01, 10) が近い。
+    """
+    summary = _summary_rows(('prophet_yearly', 0.05, 1.0, 30, 30, 1.0, 1.0),
+                            ('prophet_yearly', 0.01, 10.0, 30, 30, 1.0, 1.0))
+    assert _picked(choose_settings(summary)) == (0.01, 10.0)
+
+
+@pytest.mark.parametrize('cps_order', [(0.005, 0.5), (0.5, 0.005)])
+def test_choose_settings_keeps_listed_first_when_everything_ties(cps_order):
+    """既定値からの近さまで同点なら、表で先に並んでいる方（0.005 も 0.5 も、既定値 0.05 から1桁ずつ離れている）"""
+    summary = _summary_rows(*[('prophet_yearly', cps, 10.0, 30, 30, 1.0, 1.0)
+                              for cps in cps_order])
+    assert _picked(choose_settings(summary)) == (cps_order[0], 10.0)
+
+
+def test_choose_settings_for_no_yearly_ignores_seasonality_scale():
+    """年次季節性なしの型は、効き具合が欠測。近さは曲がりやすさだけで測り、選ぶことができる"""
+    summary = _summary_rows(('prophet_no_yearly', 0.001, np.nan, 30, 30, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.01, np.nan, 30, 30, 1.0, 1.0))
+    assert _picked(choose_settings(summary), 'prophet_no_yearly')[0] == 0.01
+
+
+def test_choose_settings_picks_exactly_one_setting_per_prophet():
+    """型ごとに1つだけ選ぶ（年次季節性あり・なしで、それぞれ1つ）"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 10, 10, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 1.0, 30, 30, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.01, np.nan, 25, 25, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.5, np.nan, 20, 20, 1.0, 1.0))
+    table = choose_settings(summary)
+    assert table.groupby('prophet')['selected'].sum().to_dict() == {
+        'prophet_yearly': 1, 'prophet_no_yearly': 1}
+
+
+def test_choose_settings_orders_by_prophet_then_selection_order():
+    """型は PROPHET_METHODS の順、型の中は選ぶ順（選んだ設定が先頭）に並べ替える"""
+    summary = _summary_rows(('prophet_no_yearly', 0.5, np.nan, 20, 20, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.01, np.nan, 25, 25, 1.0, 1.0),
+                            ('prophet_yearly', 0.01, 1.0, 10, 10, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 1.0, 30, 30, 1.0, 1.0))
+    table = choose_settings(summary)
+    assert table[['prophet', 'changepoint_prior_scale']].values.tolist() == [
+        ['prophet_yearly', 0.5], ['prophet_yearly', 0.01],
+        ['prophet_no_yearly', 0.01], ['prophet_no_yearly', 0.5]]
+    assert table['selected'].tolist() == [True, False, True, False]
+
+
+def test_choose_settings_keeps_summary_columns_and_adds_selected():
+    """summary の列をそのまま残し、最後に selected 列を足す。渡した表は書き換えない"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 10, 10, 1.0, 1.0))
+    columns = summary.columns.tolist()
+    table = choose_settings(summary)
+    assert (table.columns.tolist(), summary.columns.tolist()) == ([*columns, 'selected'], columns)
+
+
+def test_choose_settings_chooses_one_setting_for_all_units_not_per_unit():
+    """設定は全単位で1つ。単位ごとに最もよい設定を選ぶのではない
+
+    単位1・2は設定 X（0.01）で勝ち、単位3は設定 Y（0.5）でだけ勝つ。単位ごとに選ぶなら Y も選ばれるが、
+    全単位をまとめて数えるので、選ばれるのは X だけ。
+    """
+    rows = [(1, 'prophet_yearly', 0.01, 1.0, 0.5, 0.5), (2, 'prophet_yearly', 0.01, 1.0, 0.5, 0.5),
+            (3, 'prophet_yearly', 0.01, 1.0, 2.0, 2.0), (1, 'prophet_yearly', 0.5, 1.0, 2.0, 2.0),
+            (2, 'prophet_yearly', 0.5, 1.0, 2.0, 2.0), (3, 'prophet_yearly', 0.5, 1.0, 0.5, 0.5)]
+    results = pd.DataFrame(rows, columns=SETTING_RESULT_COLUMNS)
+    table = choose_settings(summarize_settings(results))
+    assert table[table['selected']]['changepoint_prior_scale'].tolist() == [0.01]
+
+
+def test_selected_settings_gives_both_scales_for_yearly_and_only_changepoint_for_no_yearly():
+    """選んだ設定を、型 → Prophet に渡す設定にする。年次季節性なしの型には、効き具合を入れない"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 30, 30, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 1.0, 10, 10, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.5, np.nan, 30, 30, 1.0, 1.0),
+                            ('prophet_no_yearly', 0.01, np.nan, 10, 10, 1.0, 1.0))
+    assert selected_settings(choose_settings(summary)) == {
+        'prophet_yearly': {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 1.0},
+        'prophet_no_yearly': {'changepoint_prior_scale': 0.5}}
+
+
+def test_selected_settings_only_from_selected_rows():
+    """選ばれなかった設定は入れない（型ごとに1つ）"""
+    summary = _summary_rows(('prophet_yearly', 0.01, 1.0, 30, 30, 1.0, 1.0),
+                            ('prophet_yearly', 0.5, 1.0, 10, 10, 1.0, 1.0))
+    assert list(selected_settings(choose_settings(summary))) == ['prophet_yearly']
+
+
+def test_chosen_settings_run_final_evaluation_with_real_prophet():
+    """設定を選んで、その設定で最後の測定を回すまでを、本物の Prophet で通す（合成データ1単位）
+
+    確かめ用の期間（8週）で設定ごとの比を出し、まとめて選び、選んだ設定で学習期間の全部（学ぶ期間 + 確かめ用の期間）から
+    学び直して、テスト期間を測る。年次季節性なしの設定には、効き具合の欠測が混ざっても、そのまま通る。
+    """
+    series = _seasonal(126)
+    learn, validation, test = series.iloc[:102], series.iloc[102:110], series.iloc[110:118]
+    results = evaluate_unit_settings(learn, validation, cps_grid=(0.01, 0.5), sps_grid=(1.0, 10.0))
+    chosen = selected_settings(choose_settings(summarize_settings(results.assign(unit=1))))
+    metrics, _, _ = evaluate_unit_with_steps(series.iloc[:110], test, prophet_settings=chosen)
+    assert set(chosen) == set(PROPHET_METHODS)
+    assert np.isfinite(list(metrics.values())).all()
