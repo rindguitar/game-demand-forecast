@@ -355,7 +355,7 @@ flowchart LR
 |---|---|
 | `build_weekly_series.py` | 週次時系列の作成と、系列の健全性の点検 |
 | `plot_weekly_series.py` | 折れ線グラフの作成（`data/timeseries/plots/`） |
-| `forecast_prophet.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合を比べる（`data/timeseries/forecast_64/`）。`--launch-events` で発売を出来事として渡す（`forecast_64_launch/`）。`--launch-steps` で発売を水準の段差としても渡す（`forecast_64_launch_step/`）。Issue #41・#60 |
+| `forecast_prophet.py` | 週次シェアを Prophet で予測し、比べる相手（学習期間の平均・直近の平均）と当たり具合を比べる（`data/timeseries/forecast_64/`）。`--launch-events` で発売を出来事として渡す（`forecast_64_launch/`）。`--launch-steps` で発売を水準の段差としても渡す（`forecast_64_launch_step/`）。`--tune` でテスト期間を見ずに Prophet の設定を選ぶ（`forecast_64_tuned/`）。Issue #41・#60 |
 
 **使用方法:**
 ```bash
@@ -364,6 +364,7 @@ docker compose exec dev python scripts/timeseries/plot_weekly_series.py
 make forecast-prophet      # 予測と評価。引数は FORECAST_ARGS で渡す
 make forecast-prophet FORECAST_ARGS="--launch-events"   # 発売を出来事として渡す
 make forecast-prophet FORECAST_ARGS="--launch-steps"    # 発売を水準の段差としても渡す
+make forecast-prophet FORECAST_ARGS="--tune"            # 確かめ用の期間で Prophet の設定を選ぶ
 ```
 
 **64本（いまの本番）で回すとき**。スクリプトの既定値は24本版のファイルを指しているので、64本は引数で渡します
@@ -404,10 +405,12 @@ flowchart LR
     F --> PL[("plots/forecast_*.png<br/>単位ごとの図")]
     F -.-> LE[("launch_events.csv<br/>渡した発売")]
     F -.-> LF[("launch_effects.csv<br/>発売の効き目")]
+    F -.-> TN[("tuning.csv<br/>確かめ用の期間の成績")]
 ```
 
 点線は `--launch-events` を付けたときだけ読む入力・書く出力です（下の「発売を出来事として渡す」）。
 `launch_effects.csv` は `--launch-steps` のときだけ書きます（下の「発売を段差の印としても渡す」）。
+`tuning.csv` は `--tune` のときだけ書きます（下の「確かめ用の期間で設定を選ぶ」）。
 
 **評価のしかた**
 
@@ -415,7 +418,7 @@ flowchart LR
   `share` が欠測の行は、学習・テストとも除きます
 - **予測する4つの方法**: Prophet（年次季節性あり）／Prophet（年次季節性なし）／
   比べる相手①「学習期間の平均」／比べる相手②「直近の平均」（学習期間の最後の4週・`--recent-weeks`）。
-  Prophet は年次季節性の有無だけを変え、ほかは既定値のままです。比べる相手も Prophet と同じ学習期間から作ります
+  Prophet は年次季節性の有無だけを変え、ほかは既定値のままです（`--tune` のときだけ、曲がりやすさと季節性の効き具合も変えます）。比べる相手も Prophet と同じ学習期間から作ります
   （発売の山やセールの週も除きません。ただし `--launch-events` のときは、渡した発売の週だけ除きます。`--launch-steps` のときは、最新の発売の後の週だけで作ります）
 - **当たり具合**: テスト期間の MAE（予測と実績の差の絶対値の平均）を、4つの方法それぞれで出します
 - **比**: `MAE(Prophet) ÷ MAE(比べる相手)`。**1未満なら Prophet の勝ち**です（ちょうど1や欠測は勝ちにしません）。
@@ -428,7 +431,7 @@ flowchart LR
 
 - Prophet の予測が負になっても**クリップしません**。負になった数だけ画面に出します
 
-**出力**（既定は `data/timeseries/forecast_64/`。`--launch-events` のときは `data/timeseries/forecast_64_launch/`、`--launch-steps` のときは `data/timeseries/forecast_64_launch_step/`）
+**出力**（既定は `data/timeseries/forecast_64/`。`--launch-events` のときは `data/timeseries/forecast_64_launch/`、`--launch-steps` のときは `data/timeseries/forecast_64_launch_step/`、`--tune` のときは `data/timeseries/forecast_64_tuned/`）
 
 | ファイル | 中身 |
 |---|---|
@@ -437,6 +440,7 @@ flowchart LR
 | `summary.csv` | 4通りの比較ごとに、勝った単位数（`wins`）・全単位数（`units`）・比の中央値（`median_ratio`） |
 | `launch_events.csv` | `--launch-events` のときだけ。選んだ（単位, 発売）の組。`unit, game, release_week, game_mentions, unit_mentions, share` |
 | `launch_effects.csv` | `--launch-steps` のときだけ。Prophet の型（年次季節性あり・なし）ごとの、（単位, 発売）ごとの効き目。`prophet, unit, keywords, game, release_week, has_step, spike_peak, step_size` |
+| `tuning.csv` | `--tune` のときだけ。確かめ用の期間での、Prophet の型 × 設定ごとの成績。`prophet, changepoint_prior_scale, seasonality_prior_scale（年次季節性なしは空）, units（数えた単位数）, wins_baseline_mean, wins_baseline_recent, min_wins, median_ratio_baseline_mean, median_ratio_baseline_recent, selected`。型ごとに選ぶ順に並び、選んだ設定の行だけ `selected` が True |
 | `plots/forecast_01.png` ほか | 単位ごとの小さい図を、30単位ずつ並べる。学習期間の最後の52週（`--plot-weeks`）の実績（灰）、テスト期間の実績（黒）、4つの予測、テスト開始の縦線。ラベルは英語。`--no-plot` で省く |
 
 **発売を出来事として渡す（`--launch-events`）**
@@ -493,6 +497,46 @@ holidays（出来事）として渡し、山を「発売のせい」と学ばせ
 - **画面と出力**: 段差の印を付けた組・付けなかった組の数も表示します。出力先は既定で
   `forecast_64_launch_step/` で、`--launch-events` の結果（`forecast_64_launch/`）は上書きしません。
   図は `--launch-events` と同じです
+
+**確かめ用の期間で設定を選ぶ（`--tune`）**
+
+Prophet の設定はここまで既定値のままでした。`--tune` は、**テスト期間を見ずに**設定を選びます
+（Issue #60 ②。`--launch-steps` も有効になります）。テストを見て選ぶと「テストに合わせた設定」になり、測り直しにならないためです。
+
+- **確かめ用の期間**: 学習期間（64本では127週）を、前の101週（**学ぶ期間**）と、後ろの26週（**確かめ用の期間**・
+  `--validation-weeks`）に分けます。確かめ用の期間を「テスト」と見なして `--launch-steps` と同じ形で予測し、
+  比べる相手と比べます。**テスト期間のデータは一切使いません**（テストの切る週より前の行だけを残してから分けます）
+- **発売も選び直す**: 切る週を確かめ用の期間の最初の週にして選び直します（その週以降のレビュー・発売は数えない。
+  確かめ用の期間の頭に出た Silksong・Borderlands 4 は対象外）。比べる相手も、学ぶ期間から同じ規則で作ります
+
+試す設定（ほかの設定は既定値のまま）:
+
+| 設定 | 試す値（既定） | 引数 |
+|---|---|---|
+| `changepoint_prior_scale`（トレンドの曲がりやすさ） | 0.001・0.01・0.05・0.5 | `--cps-grid` |
+| `seasonality_prior_scale`（季節性の効き具合） | 0.01・0.1・1・10 | `--sps-grid` |
+
+年次季節性ありの型は 4 × 4 = 16通りです。**年次季節性なしの型は季節性が無いので、曲がりやすさの4通りだけ**です
+（Prophet の既定値は 0.05 と 10）。
+
+- **選び方**: 型ごとに、全単位で確かめ用の期間を予測し、比べる相手2つそれぞれに勝った単位数を数えて、次の順で1つ選びます
+  1. 2つの勝ち数の**小さい方（min）が最も大きい**（勝ちの基準「両方に40以上」と同じ向き）
+  2. 同点なら、2つの比の中央値の平均が小さい
+  3. それでも同点なら、既定値に近い（既定値との比の対数で測る）。それでも同点なら、表で先の方
+- **設定は全単位で1つ**: 確かめ用の期間は26週の1回きりなので、単位ごとに16通りから選ぶと、
+  「たまたま当たった設定」を選んでしまうためです
+- **比べる相手を作れない単位は外す**: 最新の発売の窓（発売週から8週）が学ぶ期間の終わりまで続く単位は、
+  その後の週が無く比べる相手を作れないので、設定を選ぶ段階から外します（64本では、2025-07-28 発売の Grounded 2 が
+  最新の t3・t22・t113 で、56単位で選びます。画面に外した単位を出します）。最後の測定には全単位を使います
+- **Prophet のログ**: 学ぶ期間は700日で、Prophet が年次季節性に勧める730日より短いので、年次季節性ありの学習のたびに
+  警告が出ます。極端な設定では Stan の L-BFGS が異常終了し、Prophet 自身が Newton 法に切り替えるログも出ます。
+  設定を選ぶ段階では、同じ内容のログを最初の1回だけ表示し、回数を最後にまとめて出します
+  （10秒の打ち切りによる Newton 法への切り替えは別で、これまでどおり単位つきの ⚠️ と回数を出します）
+- **最後に1回だけテスト期間を測る**: 型ごとに選んだ設定で、127週（学習期間の全部）から学び直してテスト期間を予測します。
+  発売の選び方・比べる相手・`launch_effects.csv`・図・勝ちの基準の判定は `--launch-steps` と同じです
+- **画面と出力**: 確かめ用の期間の表（型ごとに選ぶ順・`*` が選んだ設定）→ 選んだ設定 → テスト期間の summary →
+  勝ちの基準の判定。出力先は既定で `forecast_64_tuned/` で、`--launch-steps` の結果は上書きしません。
+  学習の回数が多い（単位 × 20通り ＋ 最後の学び直し）ので、64本・既定の設定で約6〜7分かかります（`--launch-steps` は約30秒）
 
 このスクリプトの既定値（`--input`・`--output-dir`）は**64本のファイルを指します**。
 ほかの timeseries スクリプトは24本版を指したままです（Issue #56）。

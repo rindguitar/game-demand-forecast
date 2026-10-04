@@ -23,20 +23,30 @@ Prophet の予測が負になってもクリップしない（負になった数
 発売週から後を1とする説明変数（段差の印）を足す。比べる相手2つは、最新の発売の窓が終わった次の週
 から学習期間の最後までで作る。発売ごとの効き目を launch_effects.csv に書き、勝ちの基準の判定を出す。
 
+--tune を付けると（--launch-steps も有効になる）、テスト期間を見ずに Prophet の設定を選ぶ（Issue #60 ②）。
+学習期間の後ろ --validation-weeks 週を「確かめ用の期間」にして、その前で学び、設定ごと（--cps-grid ×
+--sps-grid）に確かめ用の期間を予測する。比べる相手2つの両方に勝った単位数の小さい方が最も大きい設定を、
+Prophet の型ごとに全単位で1つ選び、その設定で学習期間の全部から学び直してテスト期間を測る。
+確かめ用の期間の成績は tuning.csv に書く。
+
 処理の流れ:
   1. 週次シェアを読み、全単位を同じ週で学習とテストに分ける
+     （--tune のときは、学習期間をさらに、学ぶ期間と確かめ用の期間に分ける）
   2. （--launch-events のとき）レビューと台帳を読み、単位ごとに渡す発売を選ぶ
-  3. 単位ごとに4つの方法で予測し、MAE と比を出す
-  4. forecasts.csv / metrics.csv / summary.csv（--launch-events のときは launch_events.csv も、
-     --launch-steps のときは launch_effects.csv も）を書く
-  5. 4通りの比較（勝った単位数・比の中央値）と、負の予測の数を表示する
+     （--tune のときは、確かめ用の期間の最初の週で切って選び直した発売も）
+  3. （--tune のとき）確かめ用の期間で、設定ごとに全単位を予測し、型ごとに設定を1つ選ぶ
+  4. 単位ごとに4つの方法で予測し、MAE と比を出す
+  5. forecasts.csv / metrics.csv / summary.csv（--launch-events のときは launch_events.csv も、
+     --launch-steps のときは launch_effects.csv も、--tune のときは tuning.csv も）を書く
+  6. 4通りの比較（勝った単位数・比の中央値）と、負の予測の数を表示する
      （--launch-steps のときは、段差の印の数と、勝ちの基準の判定も）
-  6. 単位ごとの小さい図を並べる（--no-plot で省く）
+  7. 単位ごとの小さい図を並べる（--no-plot で省く）
 
 使い方:
     make forecast-prophet
     make forecast-prophet FORECAST_ARGS="--launch-events"
     make forecast-prophet FORECAST_ARGS="--launch-steps"
+    make forecast-prophet FORECAST_ARGS="--tune"
     docker compose exec dev python scripts/timeseries/forecast_prophet.py
 """
 
@@ -54,24 +64,36 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.timeseries.forecast import (  # noqa: E402
     BASELINE_METHODS,
+    CHANGEPOINT_SCALE,
+    CPS_GRID,
     LAUNCH_MIN_SHARE,
     LAUNCH_MIN_WEEKLY_MENTIONS,
     LAUNCH_WEEKS,
     METHODS,
     PROPHET_METHODS,
     RECENT_WEEKS,
+    SEASONALITY_SCALE,
+    SPS_GRID,
     TEST_WEEKS,
+    VALIDATION_WEEKS,
     WIN_CRITERION_UNITS,
     FitFallbackWarning,
+    NoBaselineWeeksError,
     check_win_criterion,
+    choose_settings,
     evaluate_unit,
+    evaluate_unit_settings,
     evaluate_unit_with_steps,
     find_target_launches,
     launch_effects_table,
     launch_holidays,
+    parse_grid,
     select_launch_events,
+    selected_settings,
     split_train_test,
+    split_validation,
     summarize_comparisons,
+    summarize_settings,
 )
 from src.timeseries.weekly import add_week_column  # noqa: E402
 from src.visualization.timeseries_plots import plot_forecast_grid  # noqa: E402
@@ -80,10 +102,22 @@ from src.visualization.timeseries_plots import plot_forecast_grid  # noqa: E402
 # 縦に長すぎるので、その半分ほどで分ける（64本なら2枚）
 UNITS_PER_PLOT = 30
 
-# 出力先の既定値。--launch-events / --launch-steps のときは、それより前の結果を上書きしないよう別にする
+# 設定を選ぶ段階で、同じ内容を1回にまとめて表示するログの出し元（Prophet 本体・Prophet の最適化・cmdstanpy）
+PROPHET_LOGGERS = ('prophet', 'prophet.models', 'cmdstanpy')
+
+# 出力先の既定値。--launch-events / --launch-steps / --tune のときは、それより前の結果を上書きしないよう別にする
 DEFAULT_OUTPUT_DIR = 'data/timeseries/forecast_64'
 LAUNCH_OUTPUT_DIR = 'data/timeseries/forecast_64_launch'
 STEP_OUTPUT_DIR = 'data/timeseries/forecast_64_launch_step'
+TUNE_OUTPUT_DIR = 'data/timeseries/forecast_64_tuned'
+
+
+def grid_argument(text):
+    """--cps-grid / --sps-grid の値（カンマ区切りの数）を読む。読めなければ、理由つきで argparse に伝える"""
+    try:
+        return parse_grid(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error))
 
 
 def parse_args():
@@ -105,6 +139,21 @@ def parse_args():
                              '発売週が学習期間の最初の週より後の発売に、発売週から後を1とする説明変数を足す。'
                              '比べる相手は、最新の発売の窓が終わった次の週から学習期間の最後までで作る。'
                              'launch_effects.csv を書き、勝ちの基準の判定を出す')
+    parser.add_argument('--tune', action='store_true',
+                        help='テスト期間を見ずに Prophet の設定を選ぶ（--launch-steps も有効になる）。'
+                             '学習期間の後ろを確かめ用の期間にして、設定ごとに予測し、'
+                             '比べる相手2つに勝った単位数の小さい方が最も大きい設定を、型ごとに全単位で'
+                             '1つ選ぶ。その設定で学習期間の全部から学び直してテスト期間を測る。'
+                             'tuning.csv を書く')
+    parser.add_argument('--validation-weeks', type=int, default=VALIDATION_WEEKS,
+                        help='確かめ用の期間の週数。学習期間の最後からこの週数（--tune のときだけ使う。'
+                             '既定 %(default)s）')
+    parser.add_argument('--cps-grid', type=grid_argument, default=CPS_GRID,
+                        help='試すトレンドの曲がりやすさ（changepoint_prior_scale）。カンマ区切り'
+                             '（--tune のときだけ使う。既定 %(default)s）')
+    parser.add_argument('--sps-grid', type=grid_argument, default=SPS_GRID,
+                        help='試す季節性の効き具合（seasonality_prior_scale）。カンマ区切り。'
+                             '年次季節性ありの型だけで試す（--tune のときだけ使う。既定 %(default)s）')
     parser.add_argument('--win-criterion', type=int, default=WIN_CRITERION_UNITS,
                         help='勝ちの基準。Prophet の型ごとに、比べる相手2つの両方に、この単位数以上で'
                              '勝てば届いた扱い（--launch-steps のときだけ判定する。既定 %(default)s）')
@@ -125,18 +174,23 @@ def parse_args():
     parser.add_argument('--output-dir', default=None,
                         help=f'出力先ディレクトリ（既定 {DEFAULT_OUTPUT_DIR}。'
                              f'--launch-events のときは {LAUNCH_OUTPUT_DIR}、'
-                             f'--launch-steps のときは {STEP_OUTPUT_DIR}）')
+                             f'--launch-steps のときは {STEP_OUTPUT_DIR}、'
+                             f'--tune のときは {TUNE_OUTPUT_DIR}）')
     parser.add_argument('--plot-weeks', type=int, default=52,
                         help='図に出す学習期間の週数。学習期間の最後からこの週数（既定 %(default)s）')
     parser.add_argument('--no-plot', action='store_true',
                         help='図を描かない')
     args = parser.parse_args()
 
-    # --launch-steps は --launch-events の上に重ねるので、付けたら --launch-events も有効にする
+    # --tune は --launch-steps の上に、--launch-steps は --launch-events の上に重ねるので、
+    # 付けたら下のオプションも有効にする
+    if args.tune:
+        args.launch_steps = True
     if args.launch_steps:
         args.launch_events = True
     if args.output_dir is None:
-        args.output_dir = (STEP_OUTPUT_DIR if args.launch_steps
+        args.output_dir = (TUNE_OUTPUT_DIR if args.tune
+                           else STEP_OUTPUT_DIR if args.launch_steps
                            else LAUNCH_OUTPUT_DIR if args.launch_events else DEFAULT_OUTPUT_DIR)
     return args
 
@@ -148,23 +202,48 @@ def quiet_prophet_logs():
     logging.getLogger('prophet').setLevel(logging.WARNING)
 
 
-def choose_launch_events(args, series, units, cutoff):
-    """レビューと台帳を読み、単位ごとに渡す発売を選んで、件数を表示する"""
+def choose_launch_events(args, series, units, cutoff, validation_cutoff=None):
+    """
+    レビューと台帳を読み、単位ごとに渡す発売を選んで、件数を表示する
+
+    validation_cutoff（確かめ用の期間の最初の週）を渡したとき（--tune）は、設定を選ぶ段階の発売も、
+    その週で切って選び直す（その週以降のレビュー・発売は使わない）。
+    返すのは (テスト期間を測る発売, 設定を選ぶ段階の発売)。validation_cutoff が None なら後ろは None
+    """
     # 1. レビューは必要な3列だけ読み（726MBあるため）、週の列を足す。台帳も読む
     reviews = add_week_column(pd.read_csv(
         args.reviews, usecols=['game_name', 'timestamp_created', 'topic_id']))
     games = pd.read_csv(args.games)
-
-    # 2. 対象の発売を数え、単位ごとに渡す発売を選ぶ
     first_week = series['week'].min()
+
+    # 2. テスト期間を測る発売を選ぶ（切る週 = テストの最初の週）
+    targets, events = choose_launch_events_at(
+        args, reviews, games, units, first_week, cutoff, '発売を出来事として渡す（--launch-events）')
+    if validation_cutoff is None:
+        return events, None
+
+    # 3. 設定を選ぶ段階の発売を選び直し、この段階で対象外になった発売を表示する
+    tune_targets, tune_events = choose_launch_events_at(
+        args, reviews, games, units, first_week, validation_cutoff,
+        '設定を選ぶ段階の発売（--tune。確かめ用の期間の最初の週で切って選び直す）')
+    excluded = targets[~targets['game'].isin(tune_targets['game'])]
+    names = '・'.join(f"{row.game}（{row.release_week:%Y-%m-%d}）" for row in excluded.itertuples())
+    print(f"  この段階で対象外の発売（テスト期間を測る発売のうち、発売週が確かめ用の期間以降）: "
+          f"{names or 'なし'}")
+    return events, tune_events
+
+
+def choose_launch_events_at(args, reviews, games, units, first_week, cutoff, title):
+    """切る週 cutoff で、単位ごとに渡す発売を選んで、件数を表示する。返すのは (対象の発売, 選んだ組)"""
+    # 1. 対象の発売を数え、単位ごとに渡す発売を選ぶ
     targets = find_target_launches(games, first_week, cutoff, args.launch_weeks)
     events = select_launch_events(
         reviews, games, units, first_week, cutoff, launch_weeks=args.launch_weeks,
         min_share=args.launch_min_share, min_weekly_mentions=args.launch_min_weekly)
 
-    # 3. 発売の数・組の数・発売が付いた単位／付かなかった単位の数を表示する
+    # 2. 発売の数・組の数・発売が付いた単位／付かなかった単位の数を表示する
     with_launch = events['unit'].nunique()
-    print("\n発売を出来事として渡す（--launch-events）")
+    print(f"\n{title}")
     print(f"  対象の発売: {len(targets)}本"
           f"（発売週から{args.launch_weeks}週がデータ期間と重なり、発売週が切る週"
           f" {cutoff:%Y-%m-%d} より前）")
@@ -173,7 +252,7 @@ def choose_launch_events(args, series, units, cutoff):
           f"週{args.launch_min_weekly}件 × 確かめる週数 以上）")
     print(f"  発売が付いた単位: {with_launch} / 付かなかった単位: {len(units) - with_launch}"
           f"（付かなかった単位は発売を渡さない）")
-    return events
+    return targets, events
 
 
 def print_summary(summary, forecasts_test):
@@ -206,6 +285,123 @@ def print_win_criterion(criterion):
         wins = '・'.join(f"{baseline} {getattr(row, f'wins_{baseline}')}"
                         for baseline in BASELINE_METHODS)
         print(f"  {row.prophet:<18}: {wins} → {'届いた' if row.reached else '届かない'}")
+
+
+def call_reporting_warnings(unit, function, *args, **kwargs):
+    """
+    function を呼び、出た警告を、どの単位かを添えてその場で表示する
+
+    返すのは (function の結果, Newton 法に切り替えた学習の数)。
+    警告（学習が時間内に終わらなかった等）は、どの単位かが分からないと読めないため。
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        result = function(*args, **kwargs)
+    for item in caught:
+        print(f"  ⚠️ t{unit}: {item.message}")
+    return result, sum(issubclass(item.category, FitFallbackWarning) for item in caught)
+
+
+def print_tuning(tuning, units):
+    """確かめ用の期間の、型 × 設定ごとの成績を、選ぶ順（型ごとに上ほど先に選ばれる）に表示する"""
+    print(f"\n{'=' * 74}\n確かめ用の期間での設定ごとの成績（型ごとに選ぶ順。* = 選んだ設定）\n{'=' * 74}")
+    names = {CHANGEPOINT_SCALE: 'cps', SEASONALITY_SCALE: 'sps',
+             'wins_baseline_mean': 'wins_mean', 'wins_baseline_recent': 'wins_recent',
+             'min_wins': 'min', 'median_ratio_baseline_mean': 'median_mean',
+             'median_ratio_baseline_recent': 'median_recent'}
+    formatters = {'cps': '{:g}'.format, 'sps': '{:g}'.format,
+                  'median_mean': '{:.3f}'.format, 'median_recent': '{:.3f}'.format,
+                  'selected': lambda value: '*' if value else ''}
+    # 年次季節性なしの型には季節性の効き具合が無いので、欠測は - で表す
+    shown = tuning.drop(columns='units').rename(columns=names)    # units はどの行も同じなので、凡例に書く
+    print(shown.to_string(index=False, formatters=formatters, na_rep='-'))
+    print(f"cps = トレンドの曲がりやすさ・sps = 季節性の効き具合（年次季節性ありの型だけ）\n"
+          f"wins_mean / wins_recent = 学習期間の平均 / 直近の平均 に勝った単位数（全{units}単位）・"
+          f"min = その小さい方・median = 比の中央値")
+
+
+def print_chosen_settings(tuning, units):
+    """選んだ設定（型ごとに1つ）と、その確かめ用の期間での成績を表示する"""
+    chosen = selected_settings(tuning)
+    print("\n選んだ設定（全単位で1つ。確かめ用の期間で、比べる相手2つに勝った単位数の小さい方が"
+          "最も大きい設定）:")
+    for row in tuning[tuning['selected']].itertuples():
+        settings = '・'.join(f"{name}={value:g}" for name, value in chosen[row.prophet].items())
+        print(f"  {row.prophet:<18}: {settings}"
+              f"（確かめ用の期間で、学習期間の平均に {row.wins_baseline_mean} / "
+              f"直近の平均に {row.wins_baseline_recent} / {units} 単位で勝った）")
+
+
+class OncePerMessage(logging.Filter):
+    """同じ内容のログを、最初の1回だけ通し、回数を数える（学習のたびに出る同じ警告で、画面が埋まらないように）"""
+
+    def __init__(self):
+        super().__init__()
+        self.counts = {}
+
+    def filter(self, record):
+        message = record.getMessage()
+        self.counts[message] = self.counts.get(message, 0) + 1
+        return self.counts[message] == 1
+
+
+def tune_settings(args, learn, validation, units, tune_events):
+    """
+    確かめ用の期間で、型 × 設定ごとに全単位を予測し、設定を型ごとに1つ選ぶ。返すのは tuning 表
+
+    処理の流れ:
+      1. 単位ごとに、型 × 設定ごとの、比べる相手2つとの比を出す（evaluate_unit_settings）。
+         比べる相手を作れない単位（最新の発売の窓が学ぶ期間の終わりまで続く）は、ここから外す
+      2. 型 × 設定ごとに、勝った単位数と比の中央値をまとめる（summarize_settings）
+      3. 型ごとに、設定を1つ選ぶ（choose_settings）。全単位で1つで、選ぶ順に並べた表になる
+      4. 設定ごとの成績の表と、選んだ設定を表示する
+    """
+    started = time.perf_counter()
+    learn_by_unit = dict(tuple(learn.groupby('unit')))
+    validation_by_unit = dict(tuple(validation.groupby('unit')))
+
+    # 1. 単位ごとに、型 × 設定ごとの比を出す
+    print(f"\n確かめ用の期間で設定を選ぶ（{len(units)}単位 × Prophet の型 × 設定を学習する。"
+          f"Prophet の同じログは1回だけ表示し、回数を最後に出す）")
+    once = OncePerMessage()
+    for name in PROPHET_LOGGERS:
+        logging.getLogger(name).addFilter(once)
+    results, skipped, fallbacks = [], [], 0
+    for done, unit in enumerate(units, start=1):
+        holidays = launch_holidays(tune_events, unit, args.launch_weeks)
+        try:
+            unit_results, unit_fallbacks = call_reporting_warnings(
+                unit, evaluate_unit_settings, learn_by_unit[unit], validation_by_unit[unit],
+                args.cps_grid, args.sps_grid, recent_weeks=args.recent_weeks,
+                value_column=args.value_col, holidays=holidays)
+        except NoBaselineWeeksError as error:
+            print(f"  ⚠️ t{unit}: 設定を選ぶ段階から外した（{error}）")
+            skipped.append(unit)
+        else:
+            fallbacks += unit_fallbacks
+            results.append(unit_results.assign(unit=unit))
+        if done % 10 == 0 or done == len(units):
+            print(f"  {done}/{len(units)}単位を確かめた")
+    for name in PROPHET_LOGGERS:
+        logging.getLogger(name).removeFilter(once)
+
+    # 2. 型 × 設定ごとにまとめ、3. 型ごとに設定を選ぶ
+    tuning = choose_settings(summarize_settings(pd.concat(results, ignore_index=True)))
+
+    # 4. 設定ごとの成績の表と、選んだ設定を表示する
+    scored = len(units) - len(skipped)
+    print_tuning(tuning, scored)
+    print_chosen_settings(tuning, scored)
+    if skipped:
+        print(f"\n設定を選ぶ段階から外した単位: {len(skipped)}"
+              f"（{'・'.join(f't{unit}' for unit in skipped)}。比べる相手を作れなかった）")
+    if once.counts:
+        print("\nProphet・cmdstanpy のログ（同じ内容は最初の1回だけ表示した。回数）:")
+        for message, count in once.counts.items():
+            print(f"  {count}回: {message[:70]}")
+    print(f"\n確かめ用の期間で Newton 法に切り替えた学習: {fallbacks}回"
+          f"（確かめ用の期間にかかった時間: {time.perf_counter() - started:.1f}秒）")
+    return tuning
 
 
 def plot_forecasts(forecasts, keywords, args, cutoff, events=None):
@@ -250,10 +446,29 @@ def main():
           f"{test['week'].max():%Y-%m-%d}）")
     print(f"  {args.value_col} が欠測のため除いた行: {series[args.value_col].isna().sum():,}")
 
-    # 2. 発売を渡すときは、レビューと台帳から、単位ごとに渡す発売を選ぶ
-    events = choose_launch_events(args, series, units, cutoff) if args.launch_events else None
+    # --tune のときは、学習期間をさらに、学ぶ期間と確かめ用の期間に分ける（テスト期間の行は使わない）
+    learn = validation = validation_cutoff = None
+    if args.tune:
+        learn, validation, validation_cutoff = split_validation(
+            series, cutoff, args.validation_weeks, value_column=args.value_col)
+        print("\n確かめ用の期間（--tune。設定を選ぶ段階では、テスト期間のデータを使わない）")
+        print(f"  学ぶ期間: {learn['week'].nunique()}週（{learn['week'].min():%Y-%m-%d} 〜 "
+              f"{learn['week'].max():%Y-%m-%d}）")
+        print(f"  確かめ用の期間: {validation['week'].nunique()}週"
+              f"（{validation['week'].min():%Y-%m-%d} 〜 {validation['week'].max():%Y-%m-%d}）")
 
-    # 3. 単位ごとに4つの方法で予測し、MAE と比を出す
+    # 2. 発売を渡すときは、レビューと台帳から、単位ごとに渡す発売を選ぶ
+    #    （--tune なら、確かめ用の期間の最初の週で切って選び直した発売も）
+    events, tune_events = (choose_launch_events(args, series, units, cutoff, validation_cutoff)
+                           if args.launch_events else (None, None))
+
+    # 3. --tune のときは、確かめ用の期間で、設定ごとに全単位を予測し、型ごとに設定を1つ選ぶ
+    tuning = chosen = None
+    if args.tune:
+        tuning = tune_settings(args, learn, validation, units, tune_events)
+        chosen = selected_settings(tuning)
+
+    # 4. 単位ごとに4つの方法で予測し、MAE と比を出す（--tune のときは、選んだ設定で学習期間の全部から学ぶ）
     info = series.drop_duplicates('unit').set_index('unit')[['category', 'keywords']]
     train_by_unit = dict(tuple(train.groupby('unit')))
     test_by_unit = dict(tuple(test.groupby('unit')))
@@ -264,26 +479,24 @@ def main():
                     if events is not None else None)
         options = {'recent_weeks': args.recent_weeks, 'value_column': args.value_col,
                    'holidays': holidays}
-        # 警告（学習が時間内に終わらなかった等）は、どの単位かを添えてその場で表示する
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            # --launch-steps のときは、段差の印を渡し、発売の効き目も一緒に受け取る
-            if args.launch_steps:
-                unit_metrics, predictions, effects_by_unit[unit] = evaluate_unit_with_steps(
-                    train_by_unit[unit], test_by_unit[unit], **options)
-            else:
-                unit_metrics, predictions = evaluate_unit(
-                    train_by_unit[unit], test_by_unit[unit], **options)
-        for item in caught:
-            print(f"  ⚠️ t{unit}: {item.message}")
-        fallbacks += sum(issubclass(item.category, FitFallbackWarning) for item in caught)
+        # --launch-steps のときは、段差の印を渡し、発売の効き目も一緒に受け取る
+        if args.launch_steps:
+            result, unit_fallbacks = call_reporting_warnings(
+                unit, evaluate_unit_with_steps, train_by_unit[unit], test_by_unit[unit],
+                prophet_settings=chosen, **options)
+            unit_metrics, predictions, effects_by_unit[unit] = result
+        else:
+            result, unit_fallbacks = call_reporting_warnings(
+                unit, evaluate_unit, train_by_unit[unit], test_by_unit[unit], **options)
+            unit_metrics, predictions = result
+        fallbacks += unit_fallbacks
         metrics_rows.append({'unit': unit, 'category': info.at[unit, 'category'],
                              'keywords': info.at[unit, 'keywords'], **unit_metrics})
         prediction_frames.append(predictions.assign(unit=unit))
         if done % 10 == 0 or done == len(units):
             print(f"  {done}/{len(units)}単位を評価した")
 
-    # 4. 結果を書く。forecasts.csv は学習週も入れ、予測の列はテスト週だけ値を持つ
+    # 5. 結果を書く。forecasts.csv は学習週も入れ、予測の列はテスト週だけ値を持つ
     metrics = pd.DataFrame(metrics_rows)
     summary = summarize_comparisons(metrics)
     future = pd.concat(prediction_frames, ignore_index=True).assign(split='test')
@@ -299,13 +512,15 @@ def main():
     if args.launch_steps:
         launch_effects = launch_effects_table(effects_by_unit, info['keywords'])
         tables.append(('launch_effects', launch_effects))
+    if tuning is not None:
+        tables.append(('tuning', tuning))
     print()
     for name, table in tables:
         path = os.path.join(args.output_dir, f'{name}.csv')
         table.to_csv(path, index=False)
         print(f"  ✅ 出力: {path}（{len(table):,}行）")
 
-    # 5. 4通りの比較と、負の予測の数を表示する（--launch-steps なら、段差の印の数と勝ちの基準の判定も）
+    # 6. 4通りの比較と、負の予測の数を表示する（--launch-steps なら、段差の印の数と勝ちの基準の判定も）
     if args.launch_steps:
         print_step_counts(launch_effects)
     print_summary(summary, future)
@@ -314,7 +529,7 @@ def main():
     print(f"\nNewton 法に切り替えた学習: {fallbacks}回"
           f"（時間内に終わらなかったもの。ほかの学習は Prophet の既定のまま）")
 
-    # 6. 単位ごとの小さい図を並べる
+    # 7. 単位ごとの小さい図を並べる
     if not args.no_plot:
         print()
         plot_forecasts(forecasts, info['keywords'], args, cutoff, events)

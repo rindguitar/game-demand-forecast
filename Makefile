@@ -53,7 +53,7 @@ help:
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
-	@echo "  make forecast-prophet     - Prophetで週次シェアを予測し平均と比べる（Issue #41・数十秒）"
+	@echo "  make forecast-prophet     - Prophetで週次シェアを予測し平均と比べる（Issue #41・数十秒。--tune は約7分）"
 	@echo ""
 	@echo "【DAPTパイプライン】"
 	@echo "  make collect-ood          - OODテストセット収集（評価用）"

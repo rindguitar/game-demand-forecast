@@ -1,12 +1,13 @@
 """
 週次のシェアを Prophet で予測し、単純な予測（比べる相手）と当たり具合を比べるモジュール
 
-方法・比べ方・学習の打ち切り・発売を出来事として渡す選び方・発売を段差の印としても渡す方法の説明は
-scripts/README.md の「予測と評価」。ファイルの読み書きはしない。
+方法・比べ方・学習の打ち切り・発売を出来事として渡す選び方・発売を段差の印としても渡す方法・
+確かめ用の期間で Prophet の設定を選ぶ方法の説明は scripts/README.md の「予測と評価」。
+ファイルの読み書きはしない。
 """
 
 import warnings
-from typing import Dict, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,12 +33,27 @@ PROPHET_METHODS = ('prophet_yearly', 'prophet_no_yearly')
 BASELINE_METHODS = ('baseline_mean', 'baseline_recent')
 METHODS = PROPHET_METHODS + BASELINE_METHODS
 
+# Prophet の型 → 年次季節性を入れるか
+YEARLY_BY_METHOD = dict(zip(PROPHET_METHODS, (True, False)))
+
 # 比べる4通り = Prophet 2つ × 比べる相手 2つ。(Prophet, 比べる相手) の組
 COMPARISONS = tuple((prophet, baseline)
                     for prophet in PROPHET_METHODS for baseline in BASELINE_METHODS)
 
 # 勝ちの基準（Issue #60）。Prophet の型ごとに、比べる相手2つの両方に、この単位数以上で勝てば届いた扱い
 WIN_CRITERION_UNITS = 40
+
+# 確かめ用の期間で選ぶ Prophet の設定2つ（Prophet の引数名。tuning.csv の列名にもなる）
+CHANGEPOINT_SCALE = 'changepoint_prior_scale'    # トレンドの曲がりやすさ
+SEASONALITY_SCALE = 'seasonality_prior_scale'    # 季節性の効き具合（年次季節性ありの型だけ）
+
+# 設定を選ぶ段階の既定値（Issue #60 ②）。確かめ用の期間の週数と、試す設定
+VALIDATION_WEEKS = 26             # テスト期間と同じ長さ
+CPS_GRID = (0.001, 0.01, 0.05, 0.5)
+SPS_GRID = (0.01, 0.1, 1.0, 10.0)
+
+# Prophet 自身の既定値。設定の成績が同点のとき、これに近い方を選ぶ
+PROPHET_DEFAULT_SETTINGS = {CHANGEPOINT_SCALE: 0.05, SEASONALITY_SCALE: 10.0}
 
 # launch_effects.csv の列（1行 = Prophet の型 × 単位 × 発売）
 LAUNCH_EFFECT_COLUMNS = ['prophet', 'unit', 'keywords', 'game', 'release_week',
@@ -86,6 +102,66 @@ def split_train_test(df: pd.DataFrame, test_weeks: int = TEST_WEEKS,
     train = observed[observed[week_column] < cutoff]
     test = observed[observed[week_column] >= cutoff]
     return train, test, cutoff
+
+
+def split_validation(df: pd.DataFrame, test_cutoff: pd.Timestamp,
+                     validation_weeks: int = VALIDATION_WEEKS,
+                     week_column: str = 'week', value_column: str = 'share'
+                     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Timestamp]:
+    """
+    学習期間を、設定を選ぶための「学ぶ期間」と「確かめ用の期間」に分ける（テスト期間は使わない）
+
+    処理の流れ:
+      1. テストの切る週より前の行だけを残す（テスト期間の行は、ここで捨てる）
+      2. split_train_test と同じ規則で、最後の validation_weeks 週を確かめ用の期間、
+         その前を学ぶ期間にする
+
+    Args:
+        df: 週の列と値の列を持つ縦長のDataFrame（全単位ぶん。テスト期間の行を含んでよい）
+        test_cutoff: テストの切る週（split_train_test が返したもの）
+        validation_weeks: 確かめ用の期間の週数
+
+    Returns:
+        (学ぶ期間, 確かめ用の期間, 確かめ用の切る週)。確かめ用の切る週は、確かめ用の期間の最初の週の月曜
+    """
+    before_test = df[df[week_column] < pd.Timestamp(test_cutoff)]
+    try:
+        return split_train_test(before_test, validation_weeks, week_column, value_column)
+    except ValueError as error:
+        raise ValueError(f'確かめ用の期間を切れない（validation_weeks={validation_weeks}）: {error}'
+                         ) from error
+
+
+def parse_grid(text: str) -> Tuple[float, ...]:
+    """
+    カンマ区切りの数（例: '0.001,0.01,0.05'）を、試す設定の並び（タプル）にする
+
+    数でない・空の要素・0以下や有限でない値・重複があれば ValueError。
+    重複を許さないのは、同じ設定を二重に数えて、勝った単位数が膨らむのを防ぐため。
+    """
+    try:
+        values = tuple(float(item) for item in text.split(','))
+    except ValueError:
+        raise ValueError(f'カンマ区切りの数で渡す（例: 0.01,0.1）: {text!r}') from None
+    if not all(np.isfinite(value) and value > 0 for value in values):
+        raise ValueError(f'0より大きい有限の数にする: {text!r}')
+    if len(set(values)) != len(values):
+        raise ValueError(f'同じ値が重なっている: {text!r}')
+    return values
+
+
+def prophet_settings_grid(prophet: str, cps_grid: Sequence[float] = CPS_GRID,
+                          sps_grid: Sequence[float] = SPS_GRID) -> List[Dict[str, float]]:
+    """
+    Prophet の型ごとに、試す設定（Prophet に渡す引数の dict）を並べる
+
+    年次季節性ありは、トレンドの曲がりやすさ × 季節性の効き具合の全組み合わせ（曲がりやすさが外側）。
+    年次季節性なしは、季節性が無く効き具合が意味を持たないので、曲がりやすさだけ（効き具合は渡さない）。
+    """
+    if YEARLY_BY_METHOD[prophet]:
+        return [{CHANGEPOINT_SCALE: cps, SEASONALITY_SCALE: sps}
+                for cps in cps_grid for sps in sps_grid]
+    return [{CHANGEPOINT_SCALE: cps} for cps in cps_grid]
 
 
 def find_target_launches(games: pd.DataFrame, first_week: pd.Timestamp, cutoff: pd.Timestamp,
@@ -259,16 +335,17 @@ class FitFallbackWarning(UserWarning):
 
 
 def _fit_prophet(history: pd.DataFrame, yearly: bool, holidays: Optional[pd.DataFrame] = None,
-                 steps: Optional[pd.DataFrame] = None, **fit_options) -> Prophet:
+                 steps: Optional[pd.DataFrame] = None,
+                 settings: Optional[Mapping[str, float]] = None, **fit_options) -> Prophet:
     """
     Prophet を学習して返す
 
-    年次季節性・holidays・段差の印（渡されたときだけ add_regressor）以外は既定値
-    （チューニング・changepoint の指定はしない）。
+    年次季節性・holidays・段差の印（渡されたときだけ add_regressor）・settings（渡されたときだけ）
+    以外は既定値（changepoint の位置の指定などはしない）。
     学習したモデルは1回しか使えないので、学び直すときは作り直す。
     """
     model = Prophet(yearly_seasonality=yearly, weekly_seasonality=False,
-                    daily_seasonality=False, holidays=holidays)
+                    daily_seasonality=False, holidays=holidays, **(settings or {}))
     if steps is not None:
         for name in steps['step']:
             model.add_regressor(name)
@@ -279,14 +356,15 @@ def fit_prophet(train: pd.DataFrame, yearly: bool,
                 week_column: str = 'week', value_column: str = 'share',
                 fit_timeout: Optional[float] = FIT_TIMEOUT_SECONDS,
                 holidays: Optional[pd.DataFrame] = None,
-                steps: Optional[pd.DataFrame] = None) -> Prophet:
+                steps: Optional[pd.DataFrame] = None,
+                settings: Optional[Mapping[str, float]] = None) -> Prophet:
     """
     Prophet を学習して返す。時間内に終わらなければ、警告を出して Newton 法で学び直す
 
     処理の流れ:
       1. 学習データを Prophet の列名（ds / y）に直し、steps があれば段差の印の列を足す
       2. 年次季節性を yearly で切り替えて学習する（週・日の季節性は使わない。
-         holidays があれば出来事、steps があれば説明変数として渡す）
+         holidays があれば出来事、steps があれば説明変数、settings があれば Prophet の設定として渡す）
       3. fit_timeout 秒で終わらなければ、同じ引数のまま Newton 法で学び直す
 
     Args:
@@ -295,15 +373,17 @@ def fit_prophet(train: pd.DataFrame, yearly: bool,
         fit_timeout: 学習1回に待つ上限（秒）。None なら待ち続ける
         holidays: 出来事の表（launch_holidays が返す形）。None なら渡さない
         steps: 段差の印の表（launch_steps が返す形）。None なら渡さない
+        settings: Prophet の設定（CHANGEPOINT_SCALE / SEASONALITY_SCALE をキーにした dict）。
+            None か、入れていないキーは Prophet の既定値のまま
     """
     history = with_step_columns(pd.DataFrame({'ds': train[week_column].to_numpy(),
                                               'y': train[value_column].to_numpy()}), steps)
     try:
-        return _fit_prophet(history, yearly, holidays, steps, timeout=fit_timeout)
+        return _fit_prophet(history, yearly, holidays, steps, settings, timeout=fit_timeout)
     except TimeoutError:
         warnings.warn(f'Prophet の学習が{fit_timeout}秒で終わらなかったので、Newton 法で学び直した'
                       f'（年次季節性{"あり" if yearly else "なし"}）', FitFallbackWarning)
-        return _fit_prophet(history, yearly, holidays, steps, algorithm='Newton')
+        return _fit_prophet(history, yearly, holidays, steps, settings, algorithm='Newton')
 
 
 def predict_prophet(model: Prophet, weeks: Sequence,
@@ -317,13 +397,14 @@ def forecast_prophet(train: pd.DataFrame, weeks: Sequence, yearly: bool,
                      week_column: str = 'week', value_column: str = 'share',
                      fit_timeout: Optional[float] = FIT_TIMEOUT_SECONDS,
                      holidays: Optional[pd.DataFrame] = None,
-                     steps: Optional[pd.DataFrame] = None) -> np.ndarray:
+                     steps: Optional[pd.DataFrame] = None,
+                     settings: Optional[Mapping[str, float]] = None) -> np.ndarray:
     """
     Prophet で学習して、指定した週の値を予測する
 
     処理の流れ:
       1. weeks が昇順であることを確かめる
-      2. Prophet を学習する（fit_prophet。holidays・steps があれば渡す。
+      2. Prophet を学習する（fit_prophet。holidays・steps・settings があれば渡す。
          fit_timeout 秒で終わらなければ、警告を出して Newton 法で学び直す）
       3. 予測したい週だけを渡して、予測値（yhat）を取り出す（predict_prophet）
 
@@ -336,6 +417,7 @@ def forecast_prophet(train: pd.DataFrame, weeks: Sequence, yearly: bool,
         fit_timeout: 学習1回に待つ上限（秒）。None なら待ち続ける
         holidays: 出来事の表（launch_holidays が返す形）。None なら渡さない
         steps: 段差の印の表（launch_steps が返す形）。None なら渡さない
+        settings: Prophet の設定（fit_prophet と同じ）。None なら既定値のまま
 
     Returns:
         weeks と同じ長さの予測値
@@ -344,7 +426,8 @@ def forecast_prophet(train: pd.DataFrame, weeks: Sequence, yearly: bool,
     if not weeks.is_monotonic_increasing:
         raise ValueError('weeks は昇順で渡す')
 
-    model = fit_prophet(train, yearly, week_column, value_column, fit_timeout, holidays, steps)
+    model = fit_prophet(train, yearly, week_column, value_column, fit_timeout, holidays, steps,
+                        settings)
     return predict_prophet(model, weeks, steps)
 
 
@@ -421,6 +504,10 @@ def drop_holiday_weeks(train: pd.DataFrame, holidays: Optional[pd.DataFrame],
     return remaining
 
 
+class NoBaselineWeeksError(ValueError):
+    """最新の発売の窓が学習期間の終わりまで続き、その後の週が1つも残らない（比べる相手を作れない）エラー"""
+
+
 def keep_weeks_after_latest_launch(train: pd.DataFrame, holidays: Optional[pd.DataFrame],
                                    week_column: str = 'week', value_column: str = 'share'
                                    ) -> pd.DataFrame:
@@ -434,7 +521,7 @@ def keep_weeks_after_latest_launch(train: pd.DataFrame, holidays: Optional[pd.Da
       1. holidays が None なら何も除かない
       2. 発売ごとの窓の終わり（ds + upper_window 日）の最も遅いものを出す
          （段差の印を付けなかった発売も数える）
-      3. 窓の終わりより後の週だけを残す。実績が1つも残らなければ止まる
+      3. 窓の終わりより後の週だけを残す。実績が1つも残らなければ NoBaselineWeeksError で止まる
     """
     if holidays is None:
         return train
@@ -443,7 +530,7 @@ def keep_weeks_after_latest_launch(train: pd.DataFrame, holidays: Optional[pd.Da
                      for row in holidays.itertuples())
     remaining = train[pd.DatetimeIndex(train[week_column]) > window_end]
     if remaining[value_column].dropna().empty:
-        raise ValueError('最新の発売の後の週が、学習期間に1つも残らない')
+        raise NoBaselineWeeksError('最新の発売の後の週が、学習期間に1つも残らない')
     return remaining
 
 
@@ -559,7 +646,8 @@ def evaluate_unit(train: pd.DataFrame, test: pd.DataFrame, recent_weeks: int = R
 def evaluate_unit_with_steps(train: pd.DataFrame, test: pd.DataFrame,
                              recent_weeks: int = RECENT_WEEKS,
                              week_column: str = 'week', value_column: str = 'share',
-                             holidays: Optional[pd.DataFrame] = None
+                             holidays: Optional[pd.DataFrame] = None,
+                             prophet_settings: Optional[Mapping[str, Mapping[str, float]]] = None
                              ) -> Tuple[Dict[str, float], pd.DataFrame, pd.DataFrame]:
     """
     1単位を4つの方法で予測し、テスト期間の当たり具合と、発売ごとの効き目を測る（段差の印を渡す版）
@@ -571,8 +659,8 @@ def evaluate_unit_with_steps(train: pd.DataFrame, test: pd.DataFrame,
     処理の流れ:
       1. テスト週を昇順に並べ、実績を取り出す
       2. 段差の印を付ける発売を選ぶ（発売週が、この単位の学習期間の最初の週より後のもの）
-      3. Prophet を年次季節性あり・なしで学習し、テスト週を予測する。
-         学習したモデルから、発売ごとの効き目を読む
+      3. Prophet を年次季節性あり・なしで学習し、テスト週を予測する（prophet_settings があれば、
+         型ごとの設定を渡す）。学習したモデルから、発売ごとの効き目を読む
       4. 比べる相手2つ（学習期間の平均・直近の平均）を、最新の発売の窓が終わった次の週以降の
          学習期間で、テスト週と同じ長さで作る
       5. 4つの方法それぞれの MAE と、4通りの比を出す
@@ -584,6 +672,8 @@ def evaluate_unit_with_steps(train: pd.DataFrame, test: pd.DataFrame,
         test: テスト期間の週と値（同テストのうち、この単位）。欠測は除いてあること
         recent_weeks: 「直近の平均」に使う、最後の週数
         holidays: この単位に渡す発売（launch_holidays が返す形）。None なら発売を渡さない
+        prophet_settings: Prophet の型（PROPHET_METHODS の名前）→ その型に渡す設定（selected_settings
+            が返す形）。None か、入れていない型は Prophet の既定値のまま
 
     Returns:
         (指標, 予測, 発売の効き目)。指標と予測は evaluate_unit と同じ形。
@@ -599,9 +689,10 @@ def evaluate_unit_with_steps(train: pd.DataFrame, test: pd.DataFrame,
 
     predictions = pd.DataFrame({week_column: weeks, 'actual': actual})
     effects = []
-    for method, yearly in (('prophet_yearly', True), ('prophet_no_yearly', False)):
+    for method, yearly in YEARLY_BY_METHOD.items():
         model = fit_prophet(train, yearly, week_column, value_column,
-                            holidays=holidays, steps=steps)
+                            holidays=holidays, steps=steps,
+                            settings=(prophet_settings or {}).get(method))
         predictions[method] = predict_prophet(model, weeks, steps)
         effects.append(read_launch_effects(model, train, holidays, steps, week_column)
                        .assign(prophet=method))
@@ -615,6 +706,68 @@ def evaluate_unit_with_steps(train: pd.DataFrame, test: pd.DataFrame,
 
     return (_score_predictions(actual, predictions), predictions,
             pd.concat(effects, ignore_index=True))
+
+
+def evaluate_unit_settings(train: pd.DataFrame, validation: pd.DataFrame,
+                           cps_grid: Sequence[float] = CPS_GRID,
+                           sps_grid: Sequence[float] = SPS_GRID,
+                           recent_weeks: int = RECENT_WEEKS,
+                           week_column: str = 'week', value_column: str = 'share',
+                           holidays: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """
+    1単位で、Prophet の型 × 設定ごとに確かめ用の期間を予測し、比べる相手2つとの比を出す
+
+    evaluate_unit_with_steps と同じ形（山の印と段差の印を渡し、比べる相手は最新の発売の窓が終わった
+    次の週以降の学習期間で作る）で、Prophet の設定だけを変えて回す。
+
+    処理の流れ:
+      1. 確かめ週を昇順に並べ、実績を取り出す
+      2. 段差の印を付ける発売を選ぶ（evaluate_unit_with_steps と同じ）
+      3. 比べる相手2つの MAE を出す（設定によらないので1回だけ）。最新の発売の窓が学ぶ期間の終わりまで
+         続いて、その後の週が1つも無ければ、比べる相手を作れないので NoBaselineWeeksError で止まる
+         （呼び出し側が、その単位を設定を選ぶ段階から外す）
+      4. 型ごとに、設定の一覧（prophet_settings_grid）を順に、Prophet を学習して確かめ週を予測し、
+         MAE と、比べる相手2つとの比を出す
+
+    Args:
+        train: 学ぶ期間の週と値（split_validation の学ぶ期間のうち、この単位）。欠測は除いてあること
+        validation: 確かめ用の期間の週と値（同じく、この単位）。欠測は除いてあること
+        cps_grid: 試すトレンドの曲がりやすさ
+        sps_grid: 試す季節性の効き具合（年次季節性ありの型だけ）
+        recent_weeks: 「直近の平均」に使う、最後の週数
+        holidays: この単位に渡す発売（設定を選ぶ段階の切る週で選んだもの）。None なら発売を渡さない
+
+    Returns:
+        型 × 設定ごとに1行のDataFrame。prophet / changepoint_prior_scale / seasonality_prior_scale
+        （年次季節性なしの型は欠測）/ ratio_baseline_mean / ratio_baseline_recent
+    """
+    if validation.empty:
+        raise ValueError('確かめ用の期間に実績が1つも無い')
+    validation = validation.sort_values(week_column)
+    weeks = pd.DatetimeIndex(validation[week_column])
+    actual = validation[value_column].to_numpy(dtype=float)
+    steps = launch_steps(holidays, train[week_column].min())
+
+    baseline_train = keep_weeks_after_latest_launch(train, holidays, week_column, value_column)
+    baseline_mae = {
+        'baseline_mean': mae(actual, baseline_mean(
+            baseline_train, len(weeks), week_column=week_column, value_column=value_column)),
+        'baseline_recent': mae(actual, baseline_recent(
+            baseline_train, len(weeks), recent_weeks=recent_weeks,
+            week_column=week_column, value_column=value_column))}
+
+    rows = []
+    for method, yearly in YEARLY_BY_METHOD.items():
+        for settings in prophet_settings_grid(method, cps_grid, sps_grid):
+            model = fit_prophet(train, yearly, week_column, value_column,
+                                holidays=holidays, steps=steps, settings=settings)
+            mae_prophet = mae(actual, predict_prophet(model, weeks, steps))
+            rows.append({'prophet': method,
+                         CHANGEPOINT_SCALE: settings[CHANGEPOINT_SCALE],
+                         SEASONALITY_SCALE: settings.get(SEASONALITY_SCALE, np.nan),
+                         **{f'ratio_{baseline}': mae_ratio(mae_prophet, baseline_mae[baseline])
+                            for baseline in BASELINE_METHODS}})
+    return pd.DataFrame(rows)
 
 
 def summarize_comparisons(metrics: pd.DataFrame) -> pd.DataFrame:
@@ -702,3 +855,92 @@ def check_win_criterion(summary: pd.DataFrame, required_wins: int = WIN_CRITERIO
                              for baseline in BASELINE_METHODS)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def summarize_settings(results: pd.DataFrame) -> pd.DataFrame:
+    """
+    全単位の（型 × 設定）ごとの比から、型 × 設定ごとの勝った単位数と比の中央値をまとめる
+
+    処理の流れ:
+      1. 型 × 設定ごとに、比べる相手2つそれぞれで、比が1未満の単位を勝ちと数える
+         （ちょうど1や欠測は勝ちにしない）
+      2. 数えた単位数（units）と、2つの勝ち数の小さい方（min_wins）、2つの比の中央値（欠測は除く）を添える
+
+    Args:
+        results: 単位ごとの evaluate_unit_settings の結果を縦に積んだ表。
+            prophet / changepoint_prior_scale / seasonality_prior_scale / ratio_<比べる相手> 2つの列を持つ
+
+    Returns:
+        型 × 設定ごとに1行（results に現れた順）。prophet / changepoint_prior_scale /
+        seasonality_prior_scale / units（数えた単位数）/ wins_<比べる相手> 2つ / min_wins /
+        median_ratio_<比べる相手> 2つ
+    """
+    keys = ['prophet', CHANGEPOINT_SCALE, SEASONALITY_SCALE]
+    rows = []
+    # 年次季節性なしの型は seasonality_prior_scale が欠測なので、欠測もキーとして残す
+    for key, group in results.groupby(keys, sort=False, dropna=False):
+        wins = {f'wins_{baseline}': int((group[f'ratio_{baseline}'] < 1).sum())
+                for baseline in BASELINE_METHODS}
+        medians = {f'median_ratio_{baseline}': group[f'ratio_{baseline}'].median()
+                   for baseline in BASELINE_METHODS}
+        rows.append({**dict(zip(keys, key)), 'units': len(group), **wins,
+                     'min_wins': min(wins.values()), **medians})
+    return pd.DataFrame(rows)
+
+
+def choose_settings(summary: pd.DataFrame) -> pd.DataFrame:
+    """
+    型ごとに、Prophet の設定を1つ選ぶ（設定は全単位で1つ。単位ごとには選ばない）
+
+    確かめ用の期間は1回きりなので、単位ごとに設定を選ぶと「たまたま当たった設定」を選んでしまう。
+
+    処理の流れ:
+      1. 並べ替えのキー（型の順・2つの中央値の平均・既定値との近さ・表の順）を作る
+      2. 型ごとに、下の「選ぶ順」で並べ替える
+      3. 型ごとに、いちばん上の行に selected を付ける
+
+    選ぶ順（型ごと。上のものほど優先）:
+      1. min_wins（比べる相手2つに勝った単位数の小さい方）が大きい
+      2. 2つの比の中央値の平均が小さい（欠測は最後）
+      3. Prophet の既定値（PROPHET_DEFAULT_SETTINGS）に近い。近さは、設定ごとに
+         「既定値との比の常用対数の絶対値」を足したもの（年次季節性なしの型は曲がりやすさだけ）
+      4. それでも同点なら、summary で先に並んでいる方
+
+    Args:
+        summary: summarize_settings の結果
+
+    Returns:
+        summary を、型（PROPHET_METHODS の順）ごとに選ぶ順に並べ替え、selected 列
+        （型ごとにいちばん上の行だけ True）を足した表
+    """
+    median_columns = [f'median_ratio_{baseline}' for baseline in BASELINE_METHODS]
+
+    def log_distance(column):
+        """既定値との比の常用対数の絶対値（欠測は欠測のまま）"""
+        return np.log10(summary[column] / PROPHET_DEFAULT_SETTINGS[column]).abs()
+
+    ranking = summary.assign(
+        _type=summary['prophet'].map(PROPHET_METHODS.index),
+        _median=summary[median_columns].mean(axis=1, skipna=False),
+        # 浮動小数点の誤差で、本来同じ近さが違って見えないよう丸める
+        _distance=(log_distance(CHANGEPOINT_SCALE)
+                   + log_distance(SEASONALITY_SCALE).fillna(0)).round(9),
+        _order=np.arange(len(summary)))
+    ranking = ranking.sort_values(['_type', 'min_wins', '_median', '_distance', '_order'],
+                                  ascending=[True, False, True, True, True])
+    ranking['selected'] = (~ranking['prophet'].duplicated()).to_numpy()
+    return ranking[[*summary.columns, 'selected']].reset_index(drop=True)
+
+
+def selected_settings(table: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    """
+    choose_settings の表から、選んだ設定を、型 → Prophet に渡す設定（dict）にする
+
+    年次季節性なしの型には、季節性の効き具合を入れない（欠測の設定は入れない）。
+    """
+    chosen = {}
+    for row in table[table['selected']].to_dict('records'):
+        settings = {name: row[name] for name in (CHANGEPOINT_SCALE, SEASONALITY_SCALE)}
+        chosen[row['prophet']] = {name: value for name, value in settings.items()
+                                  if not pd.isna(value)}
+    return chosen
