@@ -65,7 +65,7 @@ Prophet（年次季節性なし）  学習期間の平均に勝った単位 19 �
 
 ## 次の一手
 
-1. **次のフェーズを決める**（予定表では LSTM → 統合・ランキング）。「需要予測」の意味を決めた（2026-10-05・下の決定事項）ので、それに沿って決める
+1. **#63 発売後の山の続き方から、需要に合った組み合わせを見つける**（次のフェーズ・ユーザー承認）。まず段階1「続き方を測る」の方針を決める
 2. そのあと #39（Outlier）
 
 **#39 を後に回している理由**: #39 は効くかどうかが分からない（Outlier を減らしても、予測が良くなるとは限らない）。
@@ -76,6 +76,7 @@ Prophet（年次季節性なし）  学習期間の平均に勝った単位 19 �
 
 | Issue | 内容 | 状態 |
 |---|---|---|
+| [#63](https://github.com/rindguitar/game-demand-forecast/issues/63) | 発売後の山の続き方から、需要に合った組み合わせを見つける | **次に着手** |
 | [#60](https://github.com/rindguitar/game-demand-forecast/issues/60) | 予測を単純な予測に勝たせる（発売の効き目を測りながら） | 保留（基準に届かず・再開の条件は Issue 内） |
 | [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier を減らすか、許容するか | 待ち（次のフェーズを決めた後） |
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を「自動検出＋人の採否」にする | 待ち（#39 の再抽出に相乗り） |
@@ -83,7 +84,7 @@ Prophet（年次季節性なし）  学習期間の平均に勝った単位 19 �
 | [#55](https://github.com/rindguitar/game-demand-forecast/issues/55) | 供給側のタグの欠損（497本中299本）と上位6個の上限 | 待ち（#42 を再開する前に） |
 | [#56](https://github.com/rindguitar/game-demand-forecast/issues/56) | コードの積み残しを片づける | 待ち（既定値の件は予測を回すたびに踏む恐れ） |
 | [#57](https://github.com/rindguitar/game-demand-forecast/issues/57) | requirements.md / design.md を書く | 待ち |
-| [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | 需要スコアを「部品の合算」から「組み合わせ」へ広げるか | 保留（再開の条件は Issue 内） |
+| [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | 需要スコアを「部品の合算」から「組み合わせ」へ広げるか | 保留（#63 の段階3で再開する） |
 | [#19](https://github.com/rindguitar/game-demand-forecast/issues/19) | 感情分析モデルの高精度化 | 保留 |
 | [#30](https://github.com/rindguitar/game-demand-forecast/issues/30) | 多ゲーム・少レビューで OOD 精度は上がるか | 保留（時系列フェーズの後） |
 | [#10](https://github.com/rindguitar/game-demand-forecast/issues/10) | 感情分析結果の DB 保存と可視化 | 保留（2026-08-18） |
@@ -107,8 +108,8 @@ Prophet（年次季節性なし）  学習期間の平均に勝った単位 19 �
 
 ## 直近の決定事項（直近5件まで・全体は `docs/decisions.md`）
 
+- 2026-10-05: 次のフェーズは LSTM ではなく **#63**（発売後の山の続き方から、需要に合った組み合わせを見つける）
 - 2026-10-05: 「需要予測」の中心は、今の需要を読み（a）、これから来そうな**需要に合った組み合わせ**を見つけること（b）。先の値を当てる（c）は必須ではない
 - 2026-10-04: **#60 を保留**（2つの手で 40 / 59 に届かず・最高 25 / 59）。Phase 7 を区切り、次のフェーズを決める
 - 2026-10-04: 確かめ用の期間で選ぶ設定は**全単位で1つ**（単位ごとに選ぶと、たまたま当たった設定を選ぶ）
 - 2026-10-04: 発売を段差としても渡すとき、比べる相手の平均は**最新の発売の山の後の週だけ**で取る（発売前の週は今のふだんの高さを表さない）
-- 2026-10-02: STATUS には**現在地だけ**を置き、残った課題と詰まった点は **Issue** に書く
