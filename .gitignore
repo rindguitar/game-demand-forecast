@@ -3,6 +3,7 @@
 !data/raw/.gitkeep
 !data/validation/.gitkeep
 *.csv
+!configs/launch_labels.csv
 *.db
 *.sqlite
 *.sqlite3

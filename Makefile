@@ -52,6 +52,7 @@ help:
 	@echo "  make timeseries-dataset   - 収集→偏り点検を通しで実行（1.5〜2時間）"
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
+	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
 	@echo "  make forecast-prophet     - Prophetで週次シェアを予測し平均と比べる（Issue #41・数十秒。--tune は約7分）"
 	@echo ""
@@ -219,6 +220,11 @@ timeseries-dataset: collect-timeseries inspect-timeseries
 # 引数は FORECAST_ARGS で渡す。例: make forecast-prophet FORECAST_ARGS="--recent-weeks 8 --no-plot"
 forecast-prophet:
 	docker compose exec dev python scripts/timeseries/forecast_prophet.py $(FORECAST_ARGS)
+
+# 発売後の山の続き方（残った割合）を測り、区分ごとの中央値との比を出す（Issue #63・数十秒）
+# 引数は PERSISTENCE_ARGS で渡す。例: make launch-persistence PERSISTENCE_ARGS="--min-group 4"
+launch-persistence:
+	docker compose exec dev python scripts/timeseries/measure_launch_persistence.py $(PERSISTENCE_ARGS)
 
 # ============================================================
 # DAPT（ドメイン適応事前学習）パイプライン

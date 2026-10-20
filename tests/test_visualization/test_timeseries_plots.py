@@ -185,3 +185,13 @@ def test_satisfaction_colors_are_orange_and_aqua():
         r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
         assert not (r > 150 and g < 100 and b < 100), '赤系は使わない'
         assert not (g > 150 and r < 100 and b < 100), '緑系は使わない'
+
+
+def test_plot_persistence_grid_writes_file(tmp_path):
+    """組ごとの発売後の山の続き方の図が書き出せる"""
+    from src.visualization.timeseries_plots import plot_persistence_grid
+    rows = [{'name': n, 'group': g, 'weeks_since_launch': w, 'ratio': 1.0 / (w + 1)}
+            for n, g in [('A', 'first_none'), ('B', 'first_none'), ('C', 'rerelease')]
+            for w in range(30)]
+    path = plot_persistence_grid(pd.DataFrame(rows), 'test', str(tmp_path / 'p.png'))
+    assert os.path.getsize(path) > 0
