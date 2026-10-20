@@ -1,7 +1,7 @@
 """
 発売後の山の続き方を測る（Issue #63 段階1）
 
-発売直後の週平均に対して、中盤・後半の週平均がどれだけ残ったか（残った割合）を、
+発売直後の週平均に対して、中盤・後半の週中央値がどれだけ残ったか（残った割合）を、
 週次の件数と、全ゲームの中での割合の両方で測る。発売前からのファン・発売の種類で続き方が
 動くので、区分（configs/launch_labels.csv）が同じ発売どうしの中央値からの差（相対値）で見る。
 窓は発売週を0週目として、直後 = 0〜7週・中盤 = 8〜25週・後半 = 26週〜最後・発売前 = 8週前〜1週前。
@@ -101,9 +101,9 @@ def main():
     print('== 組ごとの本数と中央値 ==')
     print(summary.round(3).to_string(index=False))
     cols = ['name', 'group', 'persist_mid_count', 'persist_late_count', 'persist_mid_share',
-            'persist_late_share', 'relative_mid_count', 'relative_late_count',
-            'mismatch_mid', 'mismatch_late']
-    print('\n== 発売ごとの残った割合と相対値 ==')
+            'persist_late_share', 'persist_mean_mid_count', 'persist_mean_late_count',
+            'relative_mid_count', 'relative_late_count', 'mismatch_mid', 'mismatch_late']
+    print('\n== 発売ごとの残った割合（分子は中央値。mean は平均版の参考）と相対値 ==')
     print(result.sort_values(['group', 'name'])[cols].round(3).to_string(index=False))
     print('\n== 外した発売 ==')
     print(excluded.to_string(index=False) if len(excluded) else '無し')

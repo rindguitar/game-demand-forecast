@@ -1,7 +1,7 @@
 """
 発売後の山の続き方を測るモジュール（Issue #63 段階1）
 
-発売直後の週平均に対して、中盤・後半の週平均がどれだけ残ったか（残った割合）を、
+発売直後の週平均に対して、中盤・後半の週中央値がどれだけ残ったか（残った割合）を、
 週次の件数と、全ゲームの中での割合（シェア）の両方で測る。続き方は組み合わせと関係ない理由
 （発売前からのファン・発売の種類）でも動くので、区分が同じ発売どうしの中央値からの差（相対値）で見る。
 ファイルの読み書きはしない（forecast.py と同じ方針）。詳細は scripts/README.md を参照。
@@ -65,10 +65,12 @@ def weekly_counts(reviews: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     return counts, oldest
 
 
-def _window_mean(series: pd.Series, start: pd.Timestamp, end: pd.Timestamp):
-    """start〜end の週（両端を含む）の平均。週が1つも無ければ NaN"""
+def _window_stat(series: pd.Series, start: pd.Timestamp, end: pd.Timestamp, how: str = 'mean'):
+    """start〜end の週（両端を含む）の平均（how='mean'）または中央値（how='median'）。週が1つも無ければ NaN"""
     part = series[(series.index >= start) & (series.index <= end)]
-    return part.mean() if len(part) else np.nan
+    if not len(part):
+        return np.nan
+    return part.median() if how == 'median' else part.mean()
 
 
 def measure_persistence(counts: pd.DataFrame, oldest: pd.Series, releases: pd.Series,
@@ -76,14 +78,17 @@ def measure_persistence(counts: pd.DataFrame, oldest: pd.Series, releases: pd.Se
                         pre_weeks: int = PRE_WEEKS, missing_days: int = MISSING_DAYS
                         ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    発売ごとに、窓ごとの週平均と残った割合を出す
+    発売ごとに、窓ごとの週平均・中盤と後半の週中央値・残った割合を出す
+
+    残った割合の分子は窓の中央値（DLC・大会などのくり返す山に引っ張られないため）、
+    分母は発売直後の平均（発売直後の山の大きさそのもの）。分子が平均の版は persist_mean_* に参考で残す。
 
     処理の流れ:
       1. 件数から割合（全ゲームの中でのシェア）の表を作る
       2. 発売ごとに、測れないものを外す（最古のレビューが発売日の missing_days 日以上あと
          / 中盤の窓がデータの最後を越える）
-      3. 発売直後・中盤・後半・発売前の週平均を、件数と割合の両方で出す
-      4. 残った割合（中盤・後半 ÷ 発売直後）と発売前の比を出す
+      3. 発売直後・中盤・後半・発売前の週平均と、中盤・後半の週中央値を、件数と割合の両方で出す
+      4. 残った割合（中盤・後半の中央値 ÷ 発売直後の平均。平均版も参考）と発売前の比を出す
 
     Args:
         counts: weekly_counts の週×ゲームの件数表
@@ -119,10 +124,14 @@ def measure_persistence(counts: pd.DataFrame, oldest: pd.Series, releases: pd.Se
         for kind, table in (('count', counts), ('share', share)):
             series = table[name]
             for label, window in (('immediate', immediate), ('mid', mid), ('late', late)):
-                row[f'{label}_{kind}'] = _window_mean(series, *window)
-            row[f'pre_{kind}'] = _window_mean(series, *pre) if first_week < release_week else np.nan
-            row[f'persist_mid_{kind}'] = row[f'mid_{kind}'] / row[f'immediate_{kind}']
-            row[f'persist_late_{kind}'] = row[f'late_{kind}'] / row[f'immediate_{kind}']
+                row[f'{label}_{kind}'] = _window_stat(series, *window)
+            for label, window in (('mid', mid), ('late', late)):
+                row[f'{label}_median_{kind}'] = _window_stat(series, *window, how='median')
+            row[f'pre_{kind}'] = _window_stat(series, *pre) if first_week < release_week else np.nan
+            for label in ('mid', 'late'):
+                base = row[f'immediate_{kind}']
+                row[f'persist_{label}_{kind}'] = row[f'{label}_median_{kind}'] / base
+                row[f'persist_mean_{label}_{kind}'] = row[f'{label}_{kind}'] / base
             row[f'pre_ratio_{kind}'] = row[f'pre_{kind}'] / row[f'immediate_{kind}']
         rows.append(row)
 

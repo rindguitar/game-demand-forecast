@@ -70,8 +70,10 @@ def test_windows_and_persistence_counts(basic):
     assert a['immediate_count'] == 100
     assert a['mid_count'] == 20
     assert a['late_count'] == 20
+    assert a['mid_median_count'] == 20
     assert a['persist_mid_count'] == pytest.approx(0.2)
     assert a['persist_late_count'] == pytest.approx(0.2)
+    assert a['persist_mean_mid_count'] == pytest.approx(0.2)
 
 
 def test_window_boundary_weeks(basic):
@@ -98,6 +100,38 @@ def test_share_uses_all_games_total(basic):
     assert a['immediate_share'] == pytest.approx(100 / 205)
     assert a['mid_share'] == pytest.approx(20 / 75)
     assert a['persist_mid_share'] == pytest.approx((20 / 75) / (100 / 205))
+    assert a['persist_mean_mid_share'] == pytest.approx((20 / 75) / (100 / 205))
+
+
+@pytest.fixture
+def spiky():
+    """中盤18週のうち1週(12週目)だけ山(200)、残りは20。直後は100"""
+    weekly = _game(100, 20)
+    weekly[10 + 12] = 200
+    c, o = weekly_counts(_reviews({'A': weekly}))
+    return measure_persistence(c, o, pd.Series({'A': _release(10)}))[0].iloc[0]
+
+
+def test_persist_uses_median_of_window(spiky):
+    # 山の無い週の高さ 20 が分子になる
+    assert spiky['mid_median_count'] == 20
+    assert spiky['persist_mid_count'] == pytest.approx(20 / 100)
+
+
+def test_persist_median_smaller_than_mean(spiky):
+    assert spiky['persist_mid_count'] < spiky['persist_mean_mid_count']
+
+
+def test_persist_denominator_stays_mean():
+    weekly = _game(100, 20)
+    weekly[10 + 7] = 200  # 直後の平均は 112.5
+    c, o = weekly_counts(_reviews({'A': weekly}))
+    a = measure_persistence(c, o, pd.Series({'A': _release(10)}))[0].iloc[0]
+    assert a['persist_mid_count'] == pytest.approx(20 / 112.5)
+
+
+def test_persist_mean_column_kept(spiky):
+    assert spiky['persist_mean_mid_count'] == pytest.approx(((17 * 20) + 200) / 18 / 100)
 
 
 def test_pre_ratio(basic):
@@ -185,6 +219,14 @@ def test_group_median_relative_and_small_group():
     assert np.isnan(s.loc['first_series', 'median_mid_count'])
     assert np.isnan(r.loc['D', 'relative_mid_count'])
     assert pd.isna(r.loc['D', 'mismatch_mid'])
+
+
+def test_group_comparison_uses_median_version(spiky):
+    # 3本とも同じ値なら、組の中央値は中央値版 (0.2) で、平均版 (約0.30) ではない
+    measured = pd.DataFrame([spiky] * 3).assign(name=['A', 'B', 'C'])
+    labels = _labels([[n, 'none', 'first', ''] for n in 'ABC']).set_index('name')
+    _, summary = add_group_comparison(measured, labels, min_group=3)
+    assert summary.set_index('group').loc['first_none', 'median_mid_count'] == pytest.approx(0.2)
 
 
 def test_mismatch_flag():
