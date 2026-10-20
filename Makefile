@@ -54,6 +54,7 @@ help:
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
 	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
+	@echo "  make persistence-elements - 山の続き方と、発売が持つ要素の関係をのぞく（シャッフルで偶然の差を確認・Issue #63）"
 	@echo "  make forecast-prophet     - Prophetで週次シェアを予測し平均と比べる（Issue #41・数十秒。--tune は約7分）"
 	@echo ""
 	@echo "【DAPTパイプライン】"
@@ -225,6 +226,11 @@ forecast-prophet:
 # 引数は PERSISTENCE_ARGS で渡す。例: make launch-persistence PERSISTENCE_ARGS="--min-group 4"
 launch-persistence:
 	docker compose exec dev python scripts/timeseries/measure_launch_persistence.py $(PERSISTENCE_ARGS)
+
+# 山の続き方と要素の関係をのぞく（Issue #63 段階3・launch-persistence のあとに回す）
+# 引数は ELEMENTS_ARGS で渡す。例: make persistence-elements ELEMENTS_ARGS="--n-shuffle 5000"
+persistence-elements:
+	docker compose exec dev python scripts/timeseries/compare_persistence_elements.py $(ELEMENTS_ARGS)
 
 # ============================================================
 # DAPT（ドメイン適応事前学習）パイプライン
