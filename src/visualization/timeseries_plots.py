@@ -249,3 +249,57 @@ def plot_forecast_grid(forecasts: pd.DataFrame, title: str, save_path: str,
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     return save_path
+
+
+# 発売後の山の続き方の図（plot_persistence_grid）。線は色と線種の組み合わせで見分ける
+PERSISTENCE_COLORS = ['#2A78D6', '#EB6834', '#2AA9A0', '#8E5BB5', '#C9A227',
+                      '#3A4A5A', '#D6477F', '#6B8E23']
+PERSISTENCE_STYLES = ['-', '--', '-.']
+
+
+def plot_persistence_grid(curves: pd.DataFrame, title: str, save_path: str,
+                          groups: Optional[Sequence] = None, immediate_weeks: int = 8,
+                          mid_end: int = 26, max_weeks: int = 52) -> str:
+    """
+    組ごとに、発売からの週次件数 ÷ 発売直後の週平均 を重ねた小さい図を並べる
+
+    処理の流れ:
+      1. 描く組を決める（省略すると curves に出てくる順）
+      2. 組ごとに、1本1本の発売を線で重ね、凡例にゲーム名を置く
+      3. 1（発売直後の水準）と、窓の境目（直後 → 中盤 → 後半）に細い線を引く
+
+    Args:
+        curves: name / group / weeks_since_launch / ratio の縦長の表（persistence_curves の出力）
+        max_weeks: 図に出す発売からの週数
+    """
+    order = list(groups) if groups is not None else list(dict.fromkeys(curves['group']))
+    fig, axes, slots = _grid(len(order), columns=3, height=3.2)
+
+    for ax, group in zip(axes, order):
+        part = curves[(curves['group'] == group) & (curves['weeks_since_launch'] <= max_weeks)]
+        for i, (name, one) in enumerate(part.groupby('name', sort=False)):
+            one = one.sort_values('weeks_since_launch')
+            ax.plot(one['weeks_since_launch'], one['ratio'],
+                    color=PERSISTENCE_COLORS[i % len(PERSISTENCE_COLORS)],
+                    linestyle=PERSISTENCE_STYLES[
+                        (i // len(PERSISTENCE_COLORS)) % len(PERSISTENCE_STYLES)],
+                    linewidth=1.1, label=name)
+        ax.axhline(1.0, color=LAUNCH_COLOR, linewidth=0.8)
+        for boundary in (immediate_weeks, mid_end):
+            ax.axvline(boundary, color=LAUNCH_COLOR, linestyle=':', linewidth=0.8)
+        ax.set_title(f'{group} (n={part["name"].nunique()})', fontsize=9, loc='left')
+        ax.set_xlabel('Weeks since launch', fontsize=7)
+        ax.set_ylabel('Weekly reviews / launch-period mean', fontsize=7)
+        ax.tick_params(labelsize=7)
+        ax.legend(fontsize=6, frameon=False, loc='upper right')
+        for side in ('top', 'right'):
+            ax.spines[side].set_visible(False)
+
+    for ax in axes[len(order):slots]:
+        ax.set_visible(False)
+
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return save_path

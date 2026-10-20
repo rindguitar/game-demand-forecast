@@ -554,6 +554,56 @@ Prophet が使う Stan の最適化（L-BFGS）が、ごく稀に終わらなく
 同じ理由で、Prophet の予測は入力の最後の桁の違いでも動きます（実測: 単位ごとの比で最大1割ほど。
 勝敗は変わらず、中央値は0.03以内）。同じ入力なら毎回まったく同じ結果になります。
 
+### 発売後の山の続き方 — measure_launch_persistence.py（Issue #63 段階1）
+
+**目的**: 「ある要素の組み合わせが需要に合っていたか」を、発売後にレビューがどれだけ書かれ続けたか
+（山の続き方）で確かめる。続き方は組み合わせと関係ない理由（発売前からのファン・発売の種類）でも動くので、
+発売ごとに区分を付け、**同じ区分の中での「ふつうの続き方」からの差**で見る。
+
+**測り方**（週は月曜始まり。発売週 = 発売日をその週の月曜にしたもの）:
+
+| 窓 | 範囲（発売週を0週目） |
+|---|---|
+| 発売直後 | 0〜7週 |
+| 中盤 | 8〜25週 |
+| 後半 | 26週〜データの最後の週 |
+| 発売前 | 8週前〜1週前（レビューがある週だけ） |
+
+- ゲームごとの週次**件数**と、全64本のその週の件数に対する**割合**の2つで測る
+- 残った割合（中盤・後半）= 窓の週**中央値** ÷ 発売直後の週平均。分子を中央値にするのは、DLC・大会などのくり返す山に引っ張られず、山と山のあいだの「ふだんの高さ」を見るため。分子が平均の版は参考として `persist_mean_*` に出す。発売前の週平均 ÷ 発売直後の週平均も出す
+- 測れない発売は外して画面に出す: 最古のレビューが発売日の8日以上あと（発売直後が欠けている）、中盤の窓がデータの最後を越える
+
+**区分の考え方**（`configs/launch_labels.csv`。`name` は `games.csv` と完全一致。段階2で発売を増やしたら見直す）:
+- `fan_base`: `none`（いない）/ `source`（原作のファン）/ `series`（シリーズのファン）
+- `launch_type`: `first`（はじめての発売。早期アクセスでの初登場も含む）/ `rerelease`（出し直し）/ `ea_to_full`（早期アクセス→正式版）
+- 組: `first` は `fan_base` で分ける（`first_none` / `first_source` / `first_series`）。`rerelease` と `ea_to_full` は1組ずつ
+- 組の発売が3本以上なら、残った割合の中央値を「ふつうの続き方」とし、**相対値 = 残った割合 ÷ 組の中央値**
+  （1より大きければふつうより続いた）。3本未満の組は中央値も相対値も空
+- 件数版と割合版で「組の中央値より上か下か」が食い違う発売には印（`mismatch_mid` / `mismatch_late`）を付ける
+- 区分ファイルに無いゲームが対象に入る、または区分の値が決められた語以外なら止まる
+
+```mermaid
+flowchart LR
+    R[("reviews_timeseries<br/>_with_topics_64.csv")] --> M["measure_launch<br/>_persistence.py"]
+    G[("games.csv")] --> M
+    L[("configs/<br/>launch_labels.csv")] --> M
+    M --> P[("launch_persistence.csv")]
+    M --> S[("group_summary.csv")]
+    M --> F[("plots/<br/>persistence_by_group.png")]
+```
+
+**出力**（`--output-dir`、既定 `data/timeseries/persistence_64`）:
+- `launch_persistence.csv`: 1行1発売。窓の週平均と中盤・後半の週中央値（件数・割合）・残った割合（中央値版と、参考の平均版 `persist_mean_*`）・発売前の比・組の中央値・相対値・食い違いの印
+- `group_summary.csv`: 組ごとの本数と中央値
+- `plots/persistence_by_group.png`: 組ごとの小さい図（横軸 = 発売からの週、縦軸 = 週次件数 ÷ 発売直後の週平均）
+
+```bash
+make launch-persistence
+make launch-persistence PERSISTENCE_ARGS="--min-group 4"
+```
+
+計算は `src/timeseries/persistence.py`（ファイルの読み書きなし）。
+
 ---
 
 ## misclassification/ — 誤分類の分析パイプライン
