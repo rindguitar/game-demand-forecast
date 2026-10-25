@@ -52,7 +52,7 @@ flowchart LR
     TE["test_persistence_elements.py"] --> PE["src/timeseries/persistence_elements.py"]
 ```
 
-同じディレクトリの `test_game_selection.py` など3本は、収集スクリプトのテストです（下の表）。
+同じディレクトリの `test_game_selection.py` など4本は、収集スクリプトのテストです（下の表）。
 
 ### テストが無いモジュール
 
@@ -112,6 +112,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_persistence_elements.py` | `src/timeseries/persistence_elements.py` | 要素の表（①だけ・上位タグ）・最小本数・中央値と差・ペア・シャッフル（種固定で同じ結果・分ける要素は p が小さい）・max_diff_95・相対値が空の発売の除外 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと・予測の図が書き出せること・予測の4本が色と線種で見分けられること・発売の週の点線が範囲内のものだけ引かれること |
 | `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
+| `test_launch_collection.py` | `scripts/collect/collect_timeseries_dataset.py` | 期間中の発売を選ばずに全部返すこと（範囲の両端を含む・集め済みを除く・並び・入力を書き換えない・似たゲームも全部入る）・発売の何週前からかの計算（読めない発売日は既定の始まり） |
 | `test_collection_coverage.py` | `scripts/collect/collect_timeseries_dataset.py` | 収集の網羅性判定（直近しか無いゲームと、直近しか取れなかったゲームの区別） |
 | `test_row_trimming.py` | `scripts/collect/collect_timeseries_dataset.py` | 再収集・再開時のCSV切り詰め（重複を残さず、記録済みの行は消さないこと） |
 

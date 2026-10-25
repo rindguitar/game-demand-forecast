@@ -1,7 +1,7 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
         extract-topics compare-granularity cooccurrence validate-tags element-vocabulary test-topic \
-        collect-10k collect-20k learning-curve analyze-curve
+        collect-10k collect-20k learning-curve analyze-curve collect-launch-extra
 
 help:
 	@echo "Available commands:"
@@ -52,6 +52,7 @@ help:
 	@echo "  make timeseries-dataset   - 収集→偏り点検を通しで実行（1.5〜2時間）"
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
+	@echo "  make collect-launch-extra - 期間中の発売を選ばずに全部集める（#63 段階2・15〜20時間前後）"
 	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
 	@echo "  make persistence-elements - 山の続き方と、発売が持つ要素の関係をのぞく（シャッフルで偶然の差を確認・Issue #63）"
@@ -216,6 +217,24 @@ inspect-timeseries:
 
 # 収集 → 点検を通しで実行。収集が失敗したら点検はしない
 timeseries-dataset: collect-timeseries inspect-timeseries
+
+# 期間中に発売したゲームを、選定の規則を通さずに全部集める（Issue #63 段階2・15〜20時間前後・何回かに分けてよい）
+# 64本とは別のディレクトリに置く。期間はゲームごとに発売の8週前から今まで。中断しても同じコマンドで再開できる
+# 顔ぶれだけ見るなら: make collect-launch-extra COLLECT_ARGS=--dry-run
+LAUNCH_EXTRA_DIR ?= data/timeseries/launch_extra
+LAUNCH_FROM ?= 2023-07-31
+LAUNCH_TO ?= 2026-03-01
+LAUNCH_PRE_WEEKS ?= 8
+collect-launch-extra:
+	docker compose exec dev python scripts/collect/collect_timeseries_dataset.py \
+		--launched-from $(LAUNCH_FROM) --launched-to $(LAUNCH_TO) \
+		--exclude-games data/timeseries/games.csv \
+		--weeks-before-release $(LAUNCH_PRE_WEEKS) \
+		--output $(LAUNCH_EXTRA_DIR)/reviews_timeseries.csv \
+		--games-output $(LAUNCH_EXTRA_DIR)/games.csv \
+		--progress-output $(LAUNCH_EXTRA_DIR)/collection_progress.json \
+		--log-output $(LAUNCH_EXTRA_DIR)/collection_log.csv \
+		$(COLLECT_ARGS)
 
 # 週次シェア（全64本）を Prophet で予測し、学習期間の平均・直近の平均と当たり具合を比べる（Issue #41・数十秒）
 # 引数は FORECAST_ARGS で渡す。例: make forecast-prophet FORECAST_ARGS="--recent-weeks 8 --no-plot"
