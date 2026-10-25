@@ -119,7 +119,7 @@ flowchart LR
 
 | ファイル | 説明 |
 |---|---|
-| `steam_collector.py` | Steam APIからレビューを収集。langdetectによる英語フィルタリング付き |
+| `steam_collector.py` | Steam APIからレビューを収集。langdetectによる英語フィルタリング付き。レビューは GetAppReviews（`IUserReviewsService`）から取る。旧 appreviews は 2026-10-22 に廃止され（Issue #67）、旧形式の引数は `to_review_api_input` で新 API の入力に変換している。条件は旧と同じ（英語・新しい順・評価も買い方も全部） |
 | `preprocessing.py` | レビューテキストのクリーニング・前処理 |
 | `dataset_split.py` | Train/Val/Testへの分割ユーティリティ（stratify対応） |
 | `pool_tags.py` | 母集団キャッシュ（`pool_cache.json`）からSteamのユーザータグを読む |

@@ -5,6 +5,7 @@ Steam APIからゲームレビューを収集する機能を提供します。
 """
 
 import requests
+import json
 import time
 import re
 from datetime import datetime
@@ -68,6 +69,75 @@ def request_with_backoff(
             print(f"    ⏳ リクエスト失敗 (status={status}, "
                   f"{attempt + 1}/{max_retries}回目) → {wait:.0f}秒待機してリトライ")
             time.sleep(wait)
+
+
+# 旧 appreviews は 2026-10-22 に廃止された（Issue #67）。後継 GetAppReviews の enum 表
+REVIEWS_API_URL = 'https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/'
+REVIEW_FILTERS = {'all': 0, 'recent': 1, 'updated': 2}
+REVIEW_TYPES = {'all': 0, 'positive': 1, 'negative': 2}
+PURCHASE_TYPES = {'steam': 0, 'all': 1, 'non_steam_purchase': 2}
+
+# そのまま渡せるキー（旧 appreviews と同名・同じ値）
+_REVIEW_PASSTHROUGH_KEYS = ('num_per_page', 'cursor', 'day_range', 'filter_offtopic_activity')
+
+
+def to_review_api_input(app_id: int, params: dict) -> dict:
+    """
+    旧 appreviews 形式の引数を GetAppReviews の入力に変換する
+
+    1. appid を入れる → 2. language を languages のリストに → 3. filter 等を enum の数字に
+    → 4. そのまま渡せるキーを写す。新 API は知らない値を黙って無視するので、
+    知らないキーや表に無い値は ValueError にする（効かないまま集めてしまうのを防ぐ）。
+    入力の params は書き換えない。
+
+    Raises:
+        ValueError: 知らないキー、または表に無い値のとき
+    """
+    tables = {'filter': REVIEW_FILTERS, 'review_type': REVIEW_TYPES,
+              'purchase_type': PURCHASE_TYPES}
+    result = {'appid': app_id}
+    for key, value in params.items():
+        if key == 'json':
+            continue
+        elif key == 'language':
+            result['languages'] = [value]
+        elif key in tables:
+            if value not in tables[key]:
+                raise ValueError(f"Invalid {key}: {value!r}. Must be one of {list(tables[key])}")
+            result[key] = tables[key][value]
+        elif key in _REVIEW_PASSTHROUGH_KEYS:
+            result[key] = value
+        else:
+            raise ValueError(f"Unknown review param: {key!r}")
+    return result
+
+
+def fetch_reviews_page(
+    app_id: int,
+    params: dict,
+    headers: Optional[Dict] = None,
+    timeout: int = 10,
+    max_retries: int = 5,
+) -> dict:
+    """
+    GetAppReviews から1ページ取得し、返事の response 部分を返す
+
+    1. 旧形式の params を変換 → 2. input_json に入れて取得 → 3. response を取り出す。
+    success 欄は無く、失敗は HTTP ステータス（request_with_backoff が例外にする）で判断する。
+
+    Raises:
+        ValueError: response が無い・dict でないとき（エラーの返事を空ページ＝終端と読み違えない）
+    """
+    input_json = json.dumps(to_review_api_input(app_id, params))
+    response = request_with_backoff(
+        REVIEWS_API_URL, params={'input_json': input_json},
+        headers=headers, timeout=timeout, max_retries=max_retries,
+    )
+    body = response.json()
+    data = body.get('response') if isinstance(body, dict) else None
+    if not isinstance(data, dict):
+        raise ValueError(f"Unexpected GetAppReviews response: {str(body)[:100]}")
+    return data
 
 
 def get_popular_games(n_pages: int = 20) -> list:
@@ -188,7 +258,10 @@ def get_review_summary(app_id: int, language: str = 'english',
 
     Returns:
         total_reviews / total_positive / total_negative / review_score 等を含むdict
-        （取得失敗時は空dict）
+
+    Raises:
+        requests.exceptions.RequestException: リクエスト失敗時
+        ValueError: 返事の形が想定と違うとき
 
     Note:
         件数はSteam API側のフィルタに基づく集計であり、is_valid_english_review()
@@ -203,13 +276,8 @@ def get_review_summary(app_id: int, language: str = 'english',
         'num_per_page': 1,
         'cursor': '*',
     }
-    response = request_with_backoff(
-        f"https://store.steampowered.com/appreviews/{app_id}",
-        params=params, headers=HEADERS, timeout=20, max_retries=max_retries
-    )
-    data = response.json()
-    if data.get('success') != 1:
-        return {}
+    data = fetch_reviews_page(app_id, params, headers=HEADERS, timeout=20,
+                              max_retries=max_retries)
     return data.get('query_summary', {})
 
 
@@ -323,7 +391,6 @@ def iter_reviews_paged(
         (そのページのレビュー, 次のcursor, 停止理由)。停止理由は続く限り None で、
         最後の1回だけ STOP_* が入る。次のcursorを保存しておけば、そこから再開できる
     """
-    base_url = "https://store.steampowered.com/appreviews/"
     page_size = params.get('num_per_page', 100)
     total = collected
     cursor = start_cursor
@@ -336,16 +403,9 @@ def iter_reviews_paged(
 
         # 1. 1ページ取得（429等は request_with_backoff 側でリトライ済み）
         try:
-            response = request_with_backoff(
-                f"{base_url}{app_id}", params=params, timeout=10, max_retries=max_retries
-            )
-            data = response.json()
+            data = fetch_reviews_page(app_id, params, timeout=10, max_retries=max_retries)
         except (requests.exceptions.RequestException, ValueError) as exc:
             yield [], cursor, f'{STOP_ERROR}: {exc}'
-            return
-
-        if data.get('success') != 1:
-            yield [], cursor, f"{STOP_ERROR}: success={data.get('error', data.get('success'))}"
             return
 
         # 2. 空ページは、待って同じcursorをやり直す。

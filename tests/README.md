@@ -52,7 +52,7 @@ flowchart LR
     TE["test_persistence_elements.py"] --> PE["src/timeseries/persistence_elements.py"]
 ```
 
-同じディレクトリの `test_game_selection.py` など4本は、収集スクリプトのテストです（下の表）。
+同じディレクトリの `test_game_selection.py` など5本は、収集スクリプトのテストです（下の表）。
 
 ### テストが無いモジュール
 
@@ -87,7 +87,8 @@ make test-topic     # トピック抽出テストのみ
 | `test_preprocessing.py` | `src/data/preprocessing.py` | テキスト前処理の動作確認 |
 | `test_pool_tags.py` | `src/data/pool_tags.py` | 母集団キャッシュからのタグ読み出し・欠損の扱い |
 | `test_collection_progress.py` | `src/data/collection_progress.py` | 進捗の保存と読み出し・統計を流しながら集計すること |
-| `test_review_pagination.py` | `src/data/steam_collector.py` | ページングの停止条件・ページ単位の取得・cursorからの再開 |
+| `test_review_pagination.py` | `src/data/steam_collector.py` | ページングの停止条件・ページ単位の取得・cursorからの再開・response が無い返事で止まること |
+| `test_review_api.py` | `src/data/steam_collector.py` | 旧形式の引数から GetAppReviews の入力への変換（知らないキー・表に無い値は弾く）・1ページ取得・要約の取得 |
 
 > **注意**: `test_steam_collector.py` と `test_filtering.py` は実際にSteam APIを呼び出すため、実行には `.env` のAPIキー設定が必要です。
 
@@ -115,6 +116,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_launch_collection.py` | `scripts/collect/collect_timeseries_dataset.py` | 期間中の発売を選ばずに全部返すこと（範囲の両端を含む・集め済みを除く・並び・入力を書き換えない・似たゲームも全部入る）・発売の何週前からかの計算（読めない発売日は既定の始まり） |
 | `test_collection_coverage.py` | `scripts/collect/collect_timeseries_dataset.py` | 収集の網羅性判定（直近しか無いゲームと、直近しか取れなかったゲームの区別） |
 | `test_row_trimming.py` | `scripts/collect/collect_timeseries_dataset.py` | 再収集・再開時のCSV切り詰め（重複を残さず、記録済みの行は消さないこと） |
+| `test_consecutive_errors.py` | `scripts/collect/collect_timeseries_dataset.py` | エラーで止まったゲームが続いたら収集を中断すること（既定3本・変更できる・成功を挟むと数え直す） |
 
 ---
 
