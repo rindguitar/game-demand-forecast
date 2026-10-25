@@ -1,6 +1,6 @@
 # STATUS
 
-最終更新: 2026-10-26（作業のたびに更新）／ 直近: 旧レビュー API の廃止で段階2の収集が止まった → #67 で新しい API に移した（PR マージ待ち）
+最終更新: 2026-10-26（作業のたびに更新）／ 直近: PR #68 マージ（新しいレビュー API に移した）。#63 段階2の収集はユーザーが実行
 
 ここには**現在地だけ**を置く。ほかの情報の置き場所:
 
@@ -27,7 +27,7 @@
 
 ## 前回やったこと（直近3件まで）
 
-### 2026-10-26: 旧レビュー API の廃止に合わせて、新しい API に移した（#67・PR マージ待ち）
+### 2026-10-26: 旧レビュー API の廃止に合わせて、新しい API に移した（PR #68 マージ済み・#67 クローズ）
 
 `make collect-launch-extra` が85本とも失敗した（→ `docs/decisions.md` 2026-10-26）。
 
@@ -59,7 +59,7 @@
 
 ## 次の一手
 
-1. **#63 段階2の収集（ユーザー）**: PR（#67）をマージしたあと、`make collect-launch-extra` で取り直す
+1. **#63 段階2の収集（ユーザー）**: `make collect-launch-extra` で取り直す
    （約250〜300万件・15〜20時間前後。中断しても同じコマンドで再開できるので、何回かに分けてよい）。
    キー無しの呼び出しはレート制限が低めなので、**最初の1時間の速さ**を見て見積もりを直す
 2. 収集のあと（メイン）: 収集ログで期間未達を確かめる（HELLDIVERS 2 は上限40万件に当たる見込み、Baldur's Gate 3 も当たりうる。
@@ -74,8 +74,7 @@
 
 | Issue | 内容 | 状態 |
 |---|---|---|
-| [#67](https://github.com/rindguitar/game-demand-forecast/issues/67) | 旧レビュー API の廃止（2026-10-22）に合わせて、GetAppReviews に移す | **PR マージ待ち** |
-| [#63](https://github.com/rindguitar/game-demand-forecast/issues/63) | 発売後の山の続き方から、需要に合った組み合わせを見つける | **段階2の収集待ち**（#67 のあと・ユーザー） |
+| [#63](https://github.com/rindguitar/game-demand-forecast/issues/63) | 発売後の山の続き方から、需要に合った組み合わせを見つける | **段階2の収集待ち**（ユーザー） |
 | [#60](https://github.com/rindguitar/game-demand-forecast/issues/60) | 予測を単純な予測に勝たせる（発売の効き目を測りながら） | 保留（基準に届かず・再開の条件は Issue 内） |
 | [#39](https://github.com/rindguitar/game-demand-forecast/issues/39) | Outlier を減らすか、許容するか | 待ち（次のフェーズを決めた後） |
 | [#40](https://github.com/rindguitar/game-demand-forecast/issues/40) | 固有名詞リストの保守を「自動検出＋人の採否」にする | 待ち（#39 の再抽出に相乗り） |
