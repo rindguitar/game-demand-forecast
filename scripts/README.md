@@ -52,7 +52,7 @@ flowchart LR
 | `collect_dataset_20k.py` | 20000件のbalancedレビューを収集 |
 | `collect_ood_testset.py` | OOD評価用テストセット収集（未知20ゲーム・ジャンル/タグ偏り対策） |
 | `collect_dapt_corpus.py` | DAPT用の未ラベルコーパス収集（多様な10万件・OOD/学習ゲーム除外） |
-| `collect_timeseries_dataset.py` | 時系列予測用のレビュー収集（期間固定・自然比率・レビュー本文を保存）。母集団のメタ情報を `pool_cache.json` に貯めてから選定するため、条件を変えた選び直しは `--dry-run` で数秒。**ページ単位で追記し、中断したゲームの途中から再開できる**（`--progress-output`）。Issue #32 |
+| `collect_timeseries_dataset.py` | 時系列予測用のレビュー収集（期間固定・自然比率・レビュー本文を保存）。母集団のメタ情報を `pool_cache.json` に貯めてから選定するため、条件を変えた選び直しは `--dry-run` で数秒。**ページ単位で追記し、中断したゲームの途中から再開できる**（`--progress-output`）。`--launched-from` で期間中の発売を選ばずに全部集められる（#63 段階2）。Issue #32 |
 | `inspect_timeseries_dataset.py` | 収集した時系列データの偏り点検（収集の網羅性・自然比率・ゲーム別シェア・ジャンルの本数/量の乖離・参加ゲーム数の推移）。APIを叩かずCSVだけ読む |
 
 **時系列収集は途中から再開できます**（`collect_timeseries_dataset.py`）
@@ -87,6 +87,30 @@ make collect-timeseries COLLECT_ARGS="--extend --n-games 79 --max-per-genre 40 -
 （厳しい条件を満たす集合は緩い条件も満たすため）。後から緩めても、集めたレビューは無駄になりません。
 
 ⚠️ `--reselect` は顔ぶれを選び直すので、収集済みのゲームが入れ替わります。足すときは `--extend` を使ってください。
+
+**期間中の発売を、選ばずに全部足せます**（`make collect-launch-extra`・#63 段階2）。
+範囲内に発売したゲームを、選定の規則（ジャンル・土台の上限・タグの重なり）を通さずに全部集めます。
+集め済みの64本は除き、期間はゲームごとに「発売の8週前から今まで」です。
+
+```mermaid
+flowchart LR
+    POOL[("pool_cache.json<br/>母集団")]
+    DONE[("games.csv<br/>64本・除く")]
+    PICK["範囲内の発売を全部<br/>pick_launches"]
+    LG[("launch_extra/games.csv")]
+    COL["収集（ゲームごと）<br/>発売の8週前から今まで"]
+    OUT[("launch_extra/<br/>reviews_timeseries.csv")]
+    POOL --> PICK
+    DONE --> PICK
+    PICK --> LG
+    LG --> COL
+    COL --> OUT
+```
+
+- **別のディレクトリ（`data/timeseries/launch_extra/`）に置きます。** 64本は需要を読む表の土台なので、期間中の発売だけで選んだものを混ぜると、需要の表が最近の発売に偏ります
+- 出力の4ファイル（レビュー・台帳・進捗・ログ）が `launch_extra/` に分かれます。`--output` だけ変えると64本の台帳・進捗・ログを巻き込むので、Makefile から4つ全部渡しています
+- 顔ぶれの確認は `make collect-launch-extra COLLECT_ARGS=--dry-run`（台帳は書きません）
+- 範囲は `LAUNCH_FROM` / `LAUNCH_TO`、発売前の週数は `LAUNCH_PRE_WEEKS` で変えられます
 
 条件を変えて顔ぶれだけ見るときは `--dry-run` を付けます（APIを叩かないので数秒・台帳は変わりません）。
 

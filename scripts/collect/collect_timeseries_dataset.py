@@ -16,6 +16,8 @@
   発売から1年以上（履歴が短すぎるゲームは時系列に寄与しない）
 - 選定は3つの条件を同時に満たす組を作る（詳細は select_from_pool()）
   1. 各ジャンル最低3本  2. 土台は14本まで  3. タグが2個以上重なるゲームは入れない
+- 発売を足す（#63 段階2）: --launched-from/--launched-to で範囲内の発売を規則を通さず全部、
+  --weeks-before-release で期間をゲームごとに「発売のN週前から今まで」にする
 - 保存: ゲーム1本ごとに追記。中断しても再開できる
 - 網羅性: ゲーム別に「指定期間を全部カバーできたか」を collection_log.csv に記録する。
   再開時にスキップするのはカバーできたゲームだけで、途中で切れたものは収集し直す
@@ -429,6 +431,46 @@ def select_from_pool(pool: list, window_start: str, min_history: str, args,
     return selected, genre_counts
 
 
+def pick_launches(pool: list, launched_from: str, launched_to: str,
+                  exclude_ids: set = frozenset()) -> list:
+    """
+    発売日が範囲内のゲームを、選定の規則を通さずに全部返す（#63 段階2）
+
+    選ぶと選び方が結果を歪めるため。exclude_ids は集め済みのゲーム（二重に集めないため）。
+    1. 範囲（両端を含む）と exclude_ids で絞る → 2. tier='発売' を付けたコピーにする
+    → 3. (release_date, app_id) 順に並べる
+    """
+    picked = [dict(g, tier='発売') for g in pool
+              if launched_from <= (g.get('release_date') or '') <= launched_to
+              and g['app_id'] not in exclude_ids]
+    return sorted(picked, key=lambda g: (g['release_date'], g['app_id']))
+
+
+def release_since_ts(release_date: str, weeks_before: int, default_ts: int) -> int:
+    """
+    そのゲームの収集の始まり（発売の weeks_before 週前）を返す
+
+    発売日が無い・読めないときは default_ts（--years で決めた全体の始まり）。
+    発売日は UTC の 0時として解釈する（judge_coverage と同じ）。
+    """
+    try:
+        released = dt.datetime.strptime(release_date, '%Y-%m-%d').replace(
+            tzinfo=dt.timezone.utc).timestamp()
+    except (ValueError, TypeError):
+        return default_ts
+    return int(released - weeks_before * 7 * 86400)
+
+
+def report_launches(games: list, args, n_excluded: int) -> None:
+    """発売を全部集める対象の内訳を出す（report_selection の発売版）"""
+    total = sum(g['total_reviews'] for g in games)
+    print(f"  {len(games)}本（{args.launched_from}〜{args.launched_to} に発売・"
+          f"集め済み{n_excluded}本を除く）/ 累計レビュー {total:,}件")
+    for g in games:
+        print(f"  {g['tier']} {g['name'][:32]:32s} {g['release_date']} "
+              f"{g['total_reviews']:>8,d}件  {'/'.join(sorted(g['genres']))[:30]}")
+
+
 def report_selection(games: list, genre_counts: dict, pool: list, args) -> None:
     """選定結果の内訳を出す（層とジャンルの配分がそのまま需要スコアの配分になる）"""
     tiers = Counter(g['tier'] for g in games)
@@ -470,6 +512,17 @@ def main():
                         help='母集団の一覧を取り直す（売上上位は日々入れ替わる）')
     parser.add_argument('--extend', action='store_true',
                         help='既存の台帳を固定したまま --n-games 本まで追加する')
+    parser.add_argument('--launched-from', default=None,
+                        help='この範囲（両端を含む・YYYY-MM-DD）に発売したゲームを、'
+                             '選定の規則を通さずに全部集める（#63 段階2）')
+    parser.add_argument('--launched-to', default=None,
+                        help='--launched-from の範囲の終わり（YYYY-MM-DD）')
+    parser.add_argument('--exclude-games', default=None,
+                        help='この台帳にあるゲームは除く（--launched-from と組み合わせる。'
+                             '集め済みと二重に集めないため）')
+    parser.add_argument('--weeks-before-release', type=int, default=None,
+                        help="指定すると、期間をゲームごとに『発売のN週前から今まで』にする"
+                             "（--years の代わり）")
     parser.add_argument('--reselect', action='store_true',
                         help='既存の台帳を捨ててゲームを選び直す')
     parser.add_argument('--dry-run', action='store_true',
@@ -496,6 +549,10 @@ def main():
     parser.add_argument('--log-output', default='data/timeseries/collection_log.csv',
                         help='ゲーム別の収集結果（期間を全部カバーできたかの記録）')
     args = parser.parse_args()
+    if bool(args.launched_from) != bool(args.launched_to):
+        parser.error('--launched-from と --launched-to は両方指定してください')
+    if args.launched_from and args.extend:
+        parser.error('--launched-from と --extend は同時に指定できません')
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     since_ts = int(time.time() - args.years * 365 * 86400)
@@ -504,8 +561,15 @@ def main():
     print('=' * 70)
     print('時系列予測用レビュー収集（Issue #32）')
     print('=' * 70)
-    print(f'  期間: {since_date} 以降（{args.years}年）')
-    print(f'  対象: 累計{args.min_reviews:,}件以上のゲーム {args.n_games}本')
+    if args.weeks_before_release:
+        print(f'  期間: ゲームごとに発売の{args.weeks_before_release}週前から今まで')
+    else:
+        print(f'  期間: {since_date} 以降（{args.years}年）')
+    if args.launched_from:
+        print(f'  対象: {args.launched_from}〜{args.launched_to} に発売したゲーム'
+              f'（選定の規則を通さない）')
+    else:
+        print(f'  対象: 累計{args.min_reviews:,}件以上のゲーム {args.n_games}本')
     print(f'  出力: {args.output}')
 
     # 1. 収集済みを確認（中断からの再開）
@@ -548,8 +612,14 @@ def main():
             print('\n[1/2] ゲーム選定')
 
         pool = build_pool(args)
-        games, genre_counts = select_from_pool(pool, window_start, min_history, args,
-                                               existing=existing)
+        if args.launched_from:
+            exclude_ids = ({g['app_id'] for g in load_game_master(args.exclude_games)}
+                           if args.exclude_games else set())
+            games = pick_launches(pool, args.launched_from, args.launched_to, exclude_ids)
+            genre_counts = {}
+        else:
+            games, genre_counts = select_from_pool(pool, window_start, min_history, args,
+                                                   existing=existing)
         if not games:
             print('  条件を満たすゲームが見つかりませんでした')
             return
@@ -564,7 +634,10 @@ def main():
             if not g.get('tier'):
                 g['tier'] = ('土台' if g['release_date'] <= window_start
                              else '直近' if g['release_date'] > recent_from else '中間')
-        report_selection(games, genre_counts, pool, args)
+        if args.launched_from:
+            report_launches(games, args, len(exclude_ids))
+        else:
+            report_selection(games, genre_counts, pool, args)
         # --dry-run は「顔ぶれだけ見る」ためのものなので台帳を書き換えない。
         # 書き換えると、条件を試すだけのつもりが収集対象を変えてしまう
         if not args.dry_run:
@@ -604,9 +677,16 @@ def main():
         entry = progress.get(app_id, dict(NEW_ENTRY))
         started = entry['rows']
         reason = STOP_EXHAUSTED
+        game_since = since_ts
+        if args.weeks_before_release:
+            if game.get('release_date'):
+                game_since = release_since_ts(game['release_date'],
+                                              args.weeks_before_release, since_ts)
+            else:
+                print(f'  ⚠️ {name[:30]} は発売日が無いので --years の期間で集める')
         try:
             for page, cursor, stop in iter_natural_reviews(
-                app_id=app_id, since_ts=since_ts, max_reviews=args.max_reviews_per_game,
+                app_id=app_id, since_ts=game_since, max_reviews=args.max_reviews_per_game,
                 sleep=args.sleep, start_cursor=entry['cursor'], collected=entry['rows'],
             ):
                 # 追記 → 進捗保存の順を守る。逆にすると、その間に落ちたとき
@@ -632,7 +712,7 @@ def main():
 
         # 期間を全部カバーできたかを判定する。直近しか取れていないゲームを黙って
         # 混ぜると、合算したときに「参加ゲームが増えただけの偽の成長」を作る
-        coverage = judge_coverage(reason, entry['oldest'], since_ts,
+        coverage = judge_coverage(reason, entry['oldest'], game_since,
                                   game.get('release_date', ''))
         ratio = entry['positives'] / entry['rows'] if entry['rows'] else 0
         append_log(args.log_output, dict(
@@ -646,7 +726,7 @@ def main():
 
         note = ''
         if coverage != 'ok':
-            missing = (entry['oldest'] - since_ts) / 86400 if entry['oldest'] else 0
+            missing = (entry['oldest'] - game_since) / 86400 if entry['oldest'] else 0
             note = f'  ⚠️ 期間未達（{missing:.0f}日分不足・{coverage}/{reason[:24]}）'
             incomplete.append((name, reason))
         print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {entry['rows']:>6,d}件  "
