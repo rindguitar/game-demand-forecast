@@ -604,6 +604,39 @@ make launch-persistence PERSISTENCE_ARGS="--min-group 4"
 
 計算は `src/timeseries/persistence.py`（ファイルの読み書きなし）。
 
+### 続き方と要素の関係をのぞく — compare_persistence_elements.py（Issue #63 段階3）
+
+**目的**: よく続いた発売と続かなかった発売で、持っている要素が違うかを見る。発売が少ないうちの「当たり付け」で、結論には使わない（段階2で発売を増やしたら回し直す）。
+
+**比べ方**:
+- 対象は `launch_persistence.csv` のうち相対値が空でない発売だけ
+- 要素は**レビューの話題**（`recipes.csv` の ①ゲーム要素）を主に、**タグ**（`games.csv` の上位6個のうち、`configs/steam_tags.txt` で①にするもの）で補う
+- 要素ごとに、持つ発売が3本以上のものだけ、持つ発売と持たない発売の相対値の**中央値**と**差（持つ − 持たない）**を出す。2つの要素を両方持つ発売が3本以上の**ペア**も同じ形で見る
+
+**シャッフルの意味**: 発売と相対値の対応をランダムに入れ替えて同じ差を何度も出し、次の2つを見る（回数・種は引数。同じ入力なら毎回同じ結果）。
+- `p_shuffle`: シャッフルでも |差| が観測の |差| 以上になった割合。小さいほど「偶然ではなさそう」
+- `max_diff_95`: シャッフルのたびの「全要素でいちばん大きい |差|」の95パーセンタイル。要素をたくさん試すと、どれか1つではこれくらいの差がたまたま出る。観測の差がこの線を越えた要素は `beyond_line` が True
+
+```mermaid
+flowchart LR
+    P[("launch_persistence.csv")] --> C["compare_persistence<br/>_elements.py"]
+    R[("recipes.csv")] --> C
+    G[("games.csv")] --> C
+    T[("steam_tags.txt")] --> C
+    C --> E[("element_persistence.csv")]
+    C --> PR[("pair_persistence.csv")]
+    C --> TG[("tag_persistence.csv")]
+```
+
+**出力**（`--output-dir`、既定 `data/timeseries/persistence_64/elements`。差の大きい順）: `element_persistence.csv`（話題の要素）・`pair_persistence.csv`（話題のペア）・`tag_persistence.csv`（タグ）。列は 持つ/持たない本数・中央値2つ・差・持つ発売の名前・キーワード・`p_shuffle`・`max_diff_95`・`beyond_line`
+
+```bash
+make persistence-elements
+make persistence-elements ELEMENTS_ARGS="--n-shuffle 5000 --seed 1 --min-count 4"
+```
+
+計算は `src/timeseries/persistence_elements.py`（ファイルの読み書きなし）。
+
 ---
 
 ## misclassification/ — 誤分類の分析パイプライン
