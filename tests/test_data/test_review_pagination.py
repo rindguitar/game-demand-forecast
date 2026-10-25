@@ -8,6 +8,7 @@ Steamは連続アクセスに対し、エラーではなく空ページを返し
 
 import sys
 import os
+import json
 import time
 import pytest
 import requests
@@ -63,7 +64,7 @@ def fake_api(monkeypatch, pages):
 
 
 def page(reviews, cursor='next'):
-    return {'success': 1, 'reviews': reviews, 'cursor': cursor}
+    return {'response': {'reviews': reviews, 'cursor': cursor}}
 
 
 def collect(**kwargs):
@@ -139,11 +140,11 @@ def test_num_limit_stops_collection(monkeypatch):
     assert reason == STOP_REACHED_NUM
 
 
-def test_api_error_response_returns_partial(monkeypatch):
-    """success!=1 は例外にせず、理由付きで取れた分を返す"""
+def test_response_missing_returns_partial(monkeypatch):
+    """response が無い返事は終端と読まず、理由付きで取れた分を返す"""
     fake_api(monkeypatch, [
         page([make_review(1)], cursor='c1'),
-        {'success': 2, 'reviews': []},
+        {'error': 'something went wrong'},
     ])
     reviews, reason = collect()
     assert len(reviews) == 1
@@ -186,7 +187,7 @@ def test_start_cursor_is_sent_to_the_api(monkeypatch):
     sent = []
 
     def _request(*args, **kwargs):
-        sent.append(kwargs['params']['cursor'])
+        sent.append(json.loads(kwargs['params']['input_json'])['cursor'])
         return FakeResponse(page([make_review(40)], cursor='cX'))
 
     monkeypatch.setattr('src.data.steam_collector.request_with_backoff', _request)

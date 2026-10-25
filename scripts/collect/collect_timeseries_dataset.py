@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from src.data.steam_collector import (  # noqa: E402
+    STOP_ERROR,
     STOP_EXHAUSTED,
     STOP_REACHED_SINCE,
     get_popular_games,
@@ -486,6 +487,12 @@ def report_selection(games: list, genre_counts: dict, pool: list, args) -> None:
         print(f"  ⚠️ 下限{args.genre_floor}本に届かなかったジャンル: {short}")
 
 
+def print_abort(n_errors: int) -> None:
+    """連続エラーで収集を中断するときの表示"""
+    print(f'\n⛔ 続けて{n_errors}本がエラーで止まったので、収集を中断します'
+          '（API の障害やレート制限を疑う）。原因を確かめてから同じコマンドで再開できます')
+
+
 def main():
     parser = argparse.ArgumentParser(description='時系列予測用のレビュー収集')
     parser.add_argument('--years', type=float, default=3, help='遡る年数')
@@ -540,6 +547,9 @@ def main():
                              'なので余裕を持たせている。当たると期間を全部カバーできない')
     parser.add_argument('--seed', type=int, default=42, help='ゲーム選定のランダムシード')
     parser.add_argument('--sleep', type=float, default=0.5, help='リクエスト間の待機秒数')
+    parser.add_argument('--max-consecutive-errors', type=int, default=3,
+                        help='エラーで止まったゲームがこの本数続いたら、収集を中断する'
+                             '（API の障害やレート制限のときに、全ゲームを失敗で流さないため）')
     parser.add_argument('--output', default='data/timeseries/reviews_timeseries.csv')
     parser.add_argument('--games-output', default='data/timeseries/games.csv',
                         help='選んだゲームの台帳（ジャンル・タグ・累計レビュー数）')
@@ -670,6 +680,7 @@ def main():
     print(f'\n[2/2] レビュー収集（{len(targets)}ゲーム）')
     total_rows = 0
     incomplete = []
+    consecutive_errors = 0
     for i, game in enumerate(targets, 1):
         app_id, name = game['app_id'], game['name']
         log = {'app_id': app_id, 'name': name,
@@ -706,6 +717,10 @@ def main():
             append_log(args.log_output, dict(log, rows=entry['rows'], oldest='', newest='',
                                              coverage='partial', stop_reason=f'error: {exc}'))
             incomplete.append((name, f'error: {exc}'))
+            consecutive_errors += 1
+            if consecutive_errors >= args.max_consecutive_errors:
+                print_abort(consecutive_errors)
+                break
             continue
 
         total_rows += entry['rows'] - started
@@ -732,6 +747,11 @@ def main():
         print(f"  [{i:2d}/{len(targets)}] {name[:30]:30s} {entry['rows']:>6,d}件  "
               f"ポジ率{ratio:>5.1%}  最古{fmt_date(entry['oldest'])}  "
               f"（累計 {total_rows:,}件）{note}")
+        # iter_natural_reviews は失敗を例外でなく 'error: ...' の停止理由で返す
+        consecutive_errors = consecutive_errors + 1 if reason.startswith(STOP_ERROR) else 0
+        if consecutive_errors >= args.max_consecutive_errors:
+            print_abort(consecutive_errors)
+            break
         time.sleep(args.sleep)
 
     print(f'\n✓ 完了: {total_rows:,}件 → {args.output}')
