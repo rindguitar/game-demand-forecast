@@ -52,7 +52,7 @@ help:
 	@echo "  make timeseries-dataset   - 収集→偏り点検を通しで実行（1.5〜2時間）"
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
-	@echo "  make collect-launch-extra - 期間中の発売を選ばずに全部集める（#63 段階2・9時間前後）"
+	@echo "  make collect-launch-extra - 期間中の発売を選ばずに全部集める（#63 段階2・15〜20時間前後）"
 	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
 	@echo "  make persistence-elements - 山の続き方と、発売が持つ要素の関係をのぞく（シャッフルで偶然の差を確認・Issue #63）"
@@ -218,7 +218,7 @@ inspect-timeseries:
 # 収集 → 点検を通しで実行。収集が失敗したら点検はしない
 timeseries-dataset: collect-timeseries inspect-timeseries
 
-# 期間中に発売したゲームを、選定の規則を通さずに全部集める（Issue #63 段階2・9時間前後）
+# 期間中に発売したゲームを、選定の規則を通さずに全部集める（Issue #63 段階2・15〜20時間前後・何回かに分けてよい）
 # 64本とは別のディレクトリに置く。期間はゲームごとに発売の8週前から今まで。中断しても同じコマンドで再開できる
 # 顔ぶれだけ見るなら: make collect-launch-extra COLLECT_ARGS=--dry-run
 LAUNCH_EXTRA_DIR ?= data/timeseries/launch_extra
