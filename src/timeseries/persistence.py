@@ -18,7 +18,7 @@ PRE_WEEKS = 8         # 発売前 = 発売の8週前〜1週前
 MIN_GROUP = 3         # 中央値を出す組の最小本数
 MISSING_DAYS = 8      # 最古のレビューが発売日よりこの日数以上あとなら測れない
 
-FAN_BASES = ('none', 'source', 'series')
+FAN_BASES = ('none', 'source', 'series', 'source_series')
 LAUNCH_TYPES = ('first', 'rerelease', 'ea_to_full')
 
 # 残った割合の指標名 = (窓, 版)
@@ -42,6 +42,34 @@ def validate_labels(labels: pd.DataFrame, names) -> pd.DataFrame:
     if bad_fan or bad_type:
         raise ValueError(f'決められた語以外の区分があります: fan_base={bad_fan}, launch_type={bad_type}')
     return picked
+
+
+def apply_release_override(releases: pd.Series, labels: pd.DataFrame) -> pd.Series:
+    """
+    測定に使う発売日を、区分ファイルの release_override で置き換えたコピーを返す
+    （先行プレイなど、ストアの発売日より前から遊べた発売の初日を使うため）
+
+    処理の流れ: 1. 列が無ければそのまま返す → 2. 空の行を捨てる
+    → 3. %Y-%m-%d で読めない値があれば止まる → 4. releases にある名前だけ置き換える
+
+    Args:
+        releases: ゲーム名 → 発売日（文字列）
+        labels: validate_labels の戻り（name が索引）
+    """
+    result = releases.copy()
+    if 'release_override' not in labels.columns:
+        return result
+    values = labels['release_override'].dropna().astype(str).str.strip()
+    values = values[values != '']
+    for name, value in values.items():
+        try:
+            pd.to_datetime(value, format='%Y-%m-%d')
+        except ValueError:
+            raise ValueError(
+                f'release_override が日付（YYYY-MM-DD）で読めません: {name} = {value!r}') from None
+        if name in result.index:
+            result[name] = value
+    return result
 
 
 def assign_group(fan_base: str, launch_type: str) -> str:

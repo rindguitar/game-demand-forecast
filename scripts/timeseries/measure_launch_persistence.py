@@ -7,7 +7,8 @@
 窓は発売週を0週目として、直後 = 0〜7週・中盤 = 8〜25週・後半 = 26週〜最後・発売前 = 8週前〜1週前。
 
 処理の流れ:
-  1. レビュー・ゲーム台帳・区分ファイルを読み、対象（発売日の範囲内）の区分を検査する
+  1. レビュー・ゲーム台帳・区分ファイルを読み、対象（発売日の範囲内）の区分を検査し、
+     区分ファイルの release_override（先行プレイの初日）があれば測定に使う発売日を置き換える
   2. 週×ゲームの件数表を作り、発売ごとに窓の週平均と残った割合を出す（測れない発売は外す）
   3. 区分から組を決め、組の中央値・相対値・件数版と割合版の食い違いの印を出す
   4. launch_persistence.csv / group_summary.csv / 図を書き、表を画面に出す
@@ -32,6 +33,7 @@ from src.timeseries.persistence import (  # noqa: E402
     MISSING_DAYS,
     PRE_WEEKS,
     add_group_comparison,
+    apply_release_override,
     measure_persistence,
     persistence_curves,
     validate_labels,
@@ -74,6 +76,11 @@ def main():
                      (games['release_date'] <= args.release_to)]
     releases = in_range.set_index('name')['release_date']
     labels = validate_labels(pd.read_csv(args.labels), releases.index)
+    overridden = apply_release_override(releases, labels)
+    n_overridden = int((overridden != releases).sum())
+    if n_overridden:
+        print(f'測定に使う発売日を区分ファイルで上書き: {n_overridden}本（先行プレイ）')
+    releases = overridden
     reviews = pd.read_csv(args.reviews, usecols=['game_name', 'timestamp_created'])
 
     # 2. 窓ごとの週平均と残った割合
