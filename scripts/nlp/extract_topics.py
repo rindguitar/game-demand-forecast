@@ -181,8 +181,9 @@ def main():
     fit_df = sample_for_fit(df, args.sample_per_game, args.fit_sample_size, args.seed)
     fit_texts = fit_df['review_text'].tolist()
     split_fit = len(fit_texts) < len(texts)
-    print(f"   ✓ 学習に使う: {len(fit_texts):,}件 / 割り当て対象: {len(texts):,}件")
-    if 'game_name' in fit_df.columns:
+    fit_label = '学習なし・保存したモデルを使う' if args.model_input else f'学習 {len(fit_texts):,}件'
+    print(f"   ✓ {fit_label} / 割り当て対象: {len(texts):,}件")
+    if 'game_name' in fit_df.columns and not args.model_input:
         per = fit_df['game_name'].value_counts()
         print(f"   ✓ ゲーム別: {len(per)}本 / 最多{per.max():,}件 / 最少{per.min():,}件")
 
@@ -278,7 +279,7 @@ def main():
     print("\n" + "=" * 80)
     print("✅ トピック抽出完了")
     print("=" * 80)
-    print(f"   - 処理レビュー数: {len(texts):,}件（学習 {len(fit_texts):,}件）")
+    print(f"   - 処理レビュー数: {len(texts):,}件（{fit_label}）")
     print(f"   - 抽出トピック数: {num_topics}")
     print(f"   - Outlier: {outlier_count:,}件 ({outlier_count / len(topics) * 100:.1f}%)")
     print(f"   - 全体の所要時間: {time.time() - t0:.0f}秒")
