@@ -7,11 +7,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import pytest
+import numpy as np
 import pandas as pd
 from src.nlp.topic import (
     is_english,
     filter_english_reviews,
     remove_game_names,
+    assign_topics,
     create_topic_model,
     extract_topics,
     get_topic_info,
@@ -357,3 +359,180 @@ def test_remove_game_names_short_and_numeric_words_are_kept():
 
     assert 'dota' not in text
     assert '2' in text and '5' in text
+
+
+# --- extra_titles（入力にない別ゲームのタイトルを全レビューから消す） ---
+
+def _extra_df():
+    return pd.DataFrame({
+        'game_name': ['Palia', 'Starfield'],
+        'review_text': [
+            'better than magic the gathering arena and predecessor',
+            'magic the gathering arena fans will like predecessor here',
+        ],
+    })
+
+
+def test_remove_game_names_extra_title_multiword_is_removed_from_all_games():
+    """extra_titles の2語以上のタイトルは、どのゲームのレビューからも消える"""
+    result = remove_game_names(_extra_df(), all_games=True,
+                               extra_titles=['Magic: The Gathering Arena'])
+    assert not any('gathering' in t for t in result['review_text'])
+
+
+def test_remove_game_names_extra_title_single_word_is_kept():
+    """extra_titles の1語のタイトルは消えない"""
+    result = remove_game_names(_extra_df(), all_games=True,
+                               extra_titles=['Predecessor'])
+    assert all('predecessor' in t for t in result['review_text'])
+
+
+def test_remove_game_names_extra_title_duplicating_input_title_same_as_without():
+    """extra_titles が入力のタイトルと重複しても、重複なしのときと結果が同じ"""
+    df = pd.DataFrame({
+        'game_name': ['Palia', 'Magic: The Gathering Arena'],
+        'review_text': ['better than magic the gathering arena', 'magic the gathering arena is fun'],
+    })
+    dup = remove_game_names(df, all_games=True, extra_titles=['Magic: The Gathering Arena'])
+    plain = remove_game_names(df, all_games=True)
+    assert dup['review_text'].tolist() == plain['review_text'].tolist()
+
+
+def test_remove_game_names_extra_title_works_without_all_games():
+    """all_games=False でも extra_titles があれば全レビューから消える"""
+    result = remove_game_names(_extra_df(), all_games=False,
+                               extra_titles=['Magic: The Gathering Arena'])
+    assert not any('gathering' in t for t in result['review_text'])
+
+
+# --- assign_topics の chunk_size ---
+
+class _FakeTopicModel:
+    """テキストの長さから決まる値を返す（呼ばれた回数も数える）"""
+    def __init__(self):
+        self.calls = 0
+
+    def transform(self, texts):
+        self.calls += 1
+        topics = [len(t) % 3 - 1 for t in texts]
+        probs = np.array([len(t) / 100 for t in texts])
+        return topics, probs
+
+
+_TEXTS = ['a', 'bb', 'ccc', 'dddd', 'eeeee']
+
+
+def test_assign_topics_chunk_size_2_calls_transform_three_times():
+    """5件を chunk_size=2 で回すと transform は3回呼ばれる"""
+    model = _FakeTopicModel()
+    assign_topics(model, _TEXTS, verbose=False, chunk_size=2)
+    assert model.calls == 3
+
+
+def test_assign_topics_chunked_topics_same_as_unchunked():
+    """分けて割り当てても、topics は一度に割り当てたときと同じ"""
+    whole, _ = assign_topics(_FakeTopicModel(), _TEXTS, verbose=False, chunk_size=0)
+    chunked, _ = assign_topics(_FakeTopicModel(), _TEXTS, verbose=False, chunk_size=2)
+    assert chunked == whole
+
+
+def test_assign_topics_chunked_probabilities_same_as_unchunked():
+    """分けて割り当てても、probabilities は一度に割り当てたときと同じ"""
+    _, whole = assign_topics(_FakeTopicModel(), _TEXTS, verbose=False, chunk_size=0)
+    _, chunked = assign_topics(_FakeTopicModel(), _TEXTS, verbose=False, chunk_size=2)
+    assert np.array_equal(chunked, whole)
+
+
+def test_assign_topics_chunked_none_probabilities_stay_none():
+    """transform が確率を返さない（None）ときは、分けても None のまま"""
+    class _NoProb:
+        def transform(self, texts):
+            return [0] * len(texts), None
+    _, probs = assign_topics(_NoProb(), _TEXTS, verbose=False, chunk_size=2)
+    assert probs is None
+
+
+# --- extract_topics.py の --extra-titles 読み込み ---
+
+def test_load_extra_titles_without_name_column_exits(tmp_path):
+    """name 列が無いCSVなら止まる（黙って空にしない）"""
+    path = tmp_path / 'titles.csv'
+    path.write_text('title\nStarfield\n', encoding='utf-8')
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts/nlp'))
+    from extract_topics import load_extra_titles
+    with pytest.raises(SystemExit):
+        load_extra_titles(str(path))
+
+
+def test_load_extra_titles_missing_file_exits(tmp_path):
+    """ファイルが無いときも止まる"""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts/nlp'))
+    from extract_topics import load_extra_titles
+    with pytest.raises(SystemExit):
+        load_extra_titles(str(tmp_path / 'none.csv'))
+
+
+# --- create_topic_model の umap_random_state ---
+
+def test_create_topic_model_umap_seed_sets_random_state(monkeypatch):
+    """umap_random_state=7 なら UMAP の random_state が 7 になる"""
+    import src.nlp.topic as topic
+    monkeypatch.setattr(topic, 'SentenceTransformer', lambda name: object())
+    model = topic.create_topic_model(umap_random_state=7, verbose=False)
+    assert model.umap_model.random_state == 7
+
+
+def test_create_topic_model_umap_seed_none_keeps_default_umap(monkeypatch):
+    """None なら BERTopic の既定の UMAP のまま（random_state を足さない）"""
+    import src.nlp.topic as topic
+    monkeypatch.setattr(topic, 'SentenceTransformer', lambda name: object())
+    model = topic.create_topic_model(verbose=False)
+    assert model.umap_model.random_state is None
+
+
+# --- save_topic_model の serialization ---
+
+def test_save_topic_model_pickle_passes_pickle_to_save(tmp_path):
+    """serialization='pickle' なら model.save に pickle を渡す"""
+    from unittest.mock import MagicMock
+    from src.nlp.topic import save_topic_model
+    model = MagicMock()
+    save_topic_model(model, str(tmp_path / 'm.pkl'), serialization='pickle')
+    assert model.save.call_args.kwargs['serialization'] == 'pickle'
+
+
+# --- uses_similarity_assignment ---
+
+def test_uses_similarity_assignment_base_cluster_is_true():
+    """hdbscan_model が BaseCluster なら True"""
+    from types import SimpleNamespace
+    from bertopic.cluster import BaseCluster
+    from src.nlp.topic import uses_similarity_assignment
+    assert uses_similarity_assignment(SimpleNamespace(hdbscan_model=BaseCluster())) is True
+
+
+def test_uses_similarity_assignment_other_cluster_is_false():
+    """BaseCluster 以外（HDBSCAN など）なら False"""
+    from types import SimpleNamespace
+    from src.nlp.topic import uses_similarity_assignment
+    assert uses_similarity_assignment(SimpleNamespace(hdbscan_model=object())) is False
+
+
+# --- extract_topics.py の止まる判定 ---
+
+def test_should_stop_for_similarity_without_allow_stops():
+    """類似度の形で allow なしなら止まる"""
+    from types import SimpleNamespace
+    from bertopic.cluster import BaseCluster
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts/nlp'))
+    from extract_topics import should_stop_for_similarity
+    assert should_stop_for_similarity(SimpleNamespace(hdbscan_model=BaseCluster()), False) is True
+
+
+def test_should_stop_for_similarity_with_allow_does_not_stop():
+    """類似度の形でも allow ありなら止まらない"""
+    from types import SimpleNamespace
+    from bertopic.cluster import BaseCluster
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts/nlp'))
+    from extract_topics import should_stop_for_similarity
+    assert should_stop_for_similarity(SimpleNamespace(hdbscan_model=BaseCluster()), True) is False

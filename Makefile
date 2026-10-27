@@ -1,7 +1,8 @@
 .PHONY: help setup test lint format clean collect-data train-prophet train-lstm notebook \
         build up down restart logs shell exec gpu-check python-version \
         extract-topics compare-granularity cooccurrence validate-tags element-vocabulary test-topic \
-        collect-10k collect-20k learning-curve analyze-curve collect-launch-extra
+        collect-10k collect-20k learning-curve analyze-curve collect-launch-extra \
+        topics-fit-sample topics-fit topics-assign-64 topics-assign-85 topics-149
 
 help:
 	@echo "Available commands:"
@@ -53,6 +54,11 @@ help:
 	@echo "  make collect-timeseries   - 時系列用レビュー収集のみ（中断後も再開可）"
 	@echo "  make inspect-timeseries   - 収集データの偏り点検のみ（収集途中でも可）"
 	@echo "  make collect-launch-extra - 期間中の発売を選ばずに全部集める（#63 段階2・実績で約18時間）"
+	@echo "  make topics-149           - 149本で話題を学び直し、64本・85本に別々に割り当てる（#63 段階2・以下4つをまとめて）"
+	@echo "  make topics-fit-sample    - 149本から学習用サンプルを作る（目安: 数分）"
+	@echo "  make topics-fit           - サンプルでトピックモデルを学習しpickle保存（目安: 10〜20分）"
+	@echo "  make topics-assign-64     - 64本に149本のモデルで話題を割り当てる（目安: 約1時間）"
+	@echo "  make topics-assign-85     - 85本に149本のモデルで話題を割り当てる（目安: 約1.5時間）"
 	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
 	@echo "  make persistence-elements - 山の続き方と、発売が持つ要素の関係をのぞく（シャッフルで偶然の差を確認・Issue #63）"
@@ -235,6 +241,54 @@ collect-launch-extra:
 		--progress-output $(LAUNCH_EXTRA_DIR)/collection_progress.json \
 		--log-output $(LAUNCH_EXTRA_DIR)/collection_log.csv \
 		$(COLLECT_ARGS)
+
+# 64本＋85本（149本）で話題を学び直し、64本・85本それぞれに割り当てる（Issue #63 段階2）
+# なぜ学び直すか: 64本のモデル（models/topic_64）は safetensors 保存で UMAP/HDBSCAN を持たず、
+#   読み込むと割り当てが「話題との類似度」になり（Outlier がほぼ出ない）、学習した実行の
+#   中での割り当てと揃わない。UMAP の乱数も固定していなかったので、学び直しても同じにならない。
+#   そこで149本から新しいモデルを作り、pickle で UMAP/HDBSCAN ごと保存する（models/topic_149.pkl）
+# なぜ別々に割り当てるか: 2つで約2GBありメモリが足りなくなるため。同じモデル・同じ基準なので結果は揃う
+# なぜ相手の台帳の名前も消すか: 学習データは149本のタイトルを消したので、割り当てる側も
+#   入力にない方のタイトルを --extra-titles で消して条件をそろえる
+# 試走: make topics-assign-64 TOPIC_ARGS="--limit 20000"（topics-fit も TOPIC_ARGS で絞れる）
+# 時間は目安。試走で直す
+TOPIC_CHUNK ?= 500000
+TOPIC_MODEL ?= models/topic_149.pkl
+TOPIC_FIT_SAMPLE ?= data/timeseries/topic_fit_sample_149.csv
+topics-149: topics-fit-sample topics-fit topics-assign-64 topics-assign-85
+
+topics-fit-sample:
+	docker compose exec dev python scripts/nlp/make_topic_fit_sample.py \
+		--inputs data/timeseries/reviews_timeseries.csv $(LAUNCH_EXTRA_DIR)/reviews_timeseries.csv \
+		--output $(TOPIC_FIT_SAMPLE)
+
+topics-fit:
+	docker compose exec dev python scripts/nlp/extract_topics.py \
+		--input $(TOPIC_FIT_SAMPLE) \
+		--output data/timeseries/topic_fit_sample_149_with_topics.csv \
+		--stats-output data/timeseries/topic_statistics_fit_149.csv \
+		--skip-english-filter --remove-all-game-names \
+		--umap-seed 42 --model-format pickle --model-output $(TOPIC_MODEL) $(TOPIC_ARGS)
+
+topics-assign-64:
+	docker compose exec dev python scripts/nlp/extract_topics.py \
+		--input data/timeseries/reviews_timeseries.csv \
+		--output data/timeseries/reviews_timeseries_with_topics_149.csv \
+		--stats-output data/timeseries/topic_statistics_149_64.csv \
+		--model-input $(TOPIC_MODEL) \
+		--skip-english-filter --remove-all-game-names \
+		--extra-titles $(LAUNCH_EXTRA_DIR)/games.csv \
+		--chunk-size $(TOPIC_CHUNK) $(TOPIC_ARGS)
+
+topics-assign-85:
+	docker compose exec dev python scripts/nlp/extract_topics.py \
+		--input $(LAUNCH_EXTRA_DIR)/reviews_timeseries.csv \
+		--output $(LAUNCH_EXTRA_DIR)/reviews_timeseries_with_topics_149.csv \
+		--stats-output $(LAUNCH_EXTRA_DIR)/topic_statistics_149.csv \
+		--model-input $(TOPIC_MODEL) \
+		--skip-english-filter --remove-all-game-names \
+		--extra-titles data/timeseries/games.csv \
+		--chunk-size $(TOPIC_CHUNK) $(TOPIC_ARGS)
 
 # 週次シェア（全64本）を Prophet で予測し、学習期間の平均・直近の平均と当たり具合を比べる（Issue #41・数十秒）
 # 引数は FORECAST_ARGS で渡す。例: make forecast-prophet FORECAST_ARGS="--recent-weeks 8 --no-plot"
