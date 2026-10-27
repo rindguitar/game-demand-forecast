@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from src.timeseries.persistence import (
     add_group_comparison,
+    apply_release_override,
     assign_group,
     measure_persistence,
     persistence_curves,
@@ -193,6 +194,72 @@ def test_assign_group():
     assert assign_group('series', 'first') == 'first_series'
     assert assign_group('none', 'rerelease') == 'rerelease'
     assert assign_group('series', 'ea_to_full') == 'ea_to_full'
+
+
+def test_validate_labels_accepts_source_series():
+    picked = validate_labels(_labels([['A', 'source_series', 'first', '']]), ['A'])
+    assert picked.loc['A', 'fan_base'] == 'source_series'
+
+
+def test_assign_group_source_series_first_returns_first_source_series():
+    assert assign_group('source_series', 'first') == 'first_source_series'
+
+
+def _override_labels(values):
+    labels = _labels([[n, 'none', 'first', ''] for n in values]).set_index('name')
+    labels['release_override'] = pd.Series(values)
+    return labels
+
+
+def test_apply_release_override_with_value_replaces_date():
+    releases = pd.Series({'A': '2024-03-10', 'B': '2024-04-01'})
+    result = apply_release_override(releases, _override_labels({'A': '2024-03-05', 'B': ''}))
+    assert result['A'] == '2024-03-05'
+
+
+def test_apply_release_override_with_empty_values_keeps_ledger_date():
+    releases = pd.Series({'A': '2024-03-10', 'B': '2024-04-01', 'C': '2024-05-01'})
+    result = apply_release_override(releases, _override_labels({'A': np.nan, 'B': '', 'C': '  '}))
+    assert list(result) == ['2024-03-10', '2024-04-01', '2024-05-01']
+
+
+def test_apply_release_override_without_column_returns_same_values():
+    releases = pd.Series({'A': '2024-03-10'})
+    labels = _labels([['A', 'none', 'first', '']]).set_index('name')
+    result = apply_release_override(releases, labels)
+    assert result.equals(releases)
+
+
+def test_apply_release_override_with_unreadable_date_raises():
+    releases = pd.Series({'A': '2024-03-10'})
+    with pytest.raises(ValueError, match='A'):
+        apply_release_override(releases, _override_labels({'A': '2024/03/05'}))
+
+
+def test_apply_release_override_does_not_change_input():
+    releases = pd.Series({'A': '2024-03-10'})
+    apply_release_override(releases, _override_labels({'A': '2024-03-05'}))
+    assert releases['A'] == '2024-03-10'
+
+
+def _head_start_game():
+    """発売週（10週目）の前の週（9週目）に80件、発売週からは20件ずつのレビューがあるゲーム"""
+    counts, oldest = weekly_counts(_reviews({'A': [0] * 9 + [80] + [20] * 50, 'Z': [5] * WEEKS}))
+    return counts, oldest
+
+
+def test_measure_persistence_head_start_without_override_misses_immediate_window():
+    counts, oldest = _head_start_game()
+    measured, _ = measure_persistence(counts, oldest, pd.Series({'A': _release(10)}))
+    assert measured.iloc[0]['immediate_count'] == 20
+
+
+def test_measure_persistence_head_start_with_override_enters_immediate_window():
+    counts, oldest = _head_start_game()
+    releases = apply_release_override(pd.Series({'A': _release(10)}),
+                                      _override_labels({'A': _release(9)}))
+    measured, _ = measure_persistence(counts, oldest, releases)
+    assert measured.iloc[0]['immediate_count'] == pytest.approx((80 + 20 * 7) / 8)
 
 
 def _measured(values: dict) -> pd.DataFrame:

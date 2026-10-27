@@ -600,10 +600,11 @@ Prophet が使う Stan の最適化（L-BFGS）が、ごく稀に終わらなく
 - 残った割合（中盤・後半）= 窓の週**中央値** ÷ 発売直後の週平均。分子を中央値にするのは、DLC・大会などのくり返す山に引っ張られず、山と山のあいだの「ふだんの高さ」を見るため。分子が平均の版は参考として `persist_mean_*` に出す。発売前の週平均 ÷ 発売直後の週平均も出す
 - 測れない発売は外して画面に出す: 最古のレビューが発売日の8日以上あと（発売直後が欠けている）、中盤の窓がデータの最後を越える
 
-**区分の考え方**（`configs/launch_labels.csv`。`name` は `games.csv` と完全一致。段階2で発売を増やしたら見直す）:
-- `fan_base`: `none`（いない）/ `source`（原作のファン）/ `series`（シリーズのファン）
+**区分の考え方**（`configs/launch_labels.csv`。`name` はゲーム台帳と完全一致。段階1の25本に、段階2の85本〈`data/timeseries/launch_extra/games.csv`〉を足した。付け方は `docs/decisions.md` 2026-10-20・2026-10-27）:
+- `fan_base`: `none`（いない）/ `source`（原作のファン）/ `series`（シリーズのファン）/ `source_series`（原作でありシリーズ）
 - `launch_type`: `first`（はじめての発売。早期アクセスでの初登場も含む）/ `rerelease`（出し直し）/ `ea_to_full`（早期アクセス→正式版）
-- 組: `first` は `fan_base` で分ける（`first_none` / `first_source` / `first_series`）。`rerelease` と `ea_to_full` は1組ずつ
+- `release_override`（任意）: 測定に使う発売日（YYYY-MM-DD）。上位版の先行プレイなど、ストアの発売日より前から遊べた発売の初日を入れる。空なら `games.csv` の発売日。読めない日付なら止まる。対象の絞り込み（`--release-from/--release-to`）は `games.csv` の発売日のまま、その後に上書きする
+- 組: `first` は `fan_base` で分ける（`first_none` / `first_source` / `first_series` / `first_source_series`）。`rerelease` と `ea_to_full` は1組ずつ
 - 組の発売が3本以上なら、残った割合の中央値を「ふつうの続き方」とし、**相対値 = 残った割合 ÷ 組の中央値**
   （1より大きければふつうより続いた）。3本未満の組は中央値も相対値も空
 - 件数版と割合版で「組の中央値より上か下か」が食い違う発売には印（`mismatch_mid` / `mismatch_late`）を付ける

@@ -1,26 +1,111 @@
-name,fan_base,launch_type,note
-Overwatch®,series,rerelease,Steam での発売。発売直後のレビューが集まっていない
-Starfield,none,first,
-TEKKEN 8,series,first,
-The Outlast Trials,series,ea_to_full,Outlast シリーズの派生
-Palia,none,rerelease,自社ランチャーで出たあとの Steam 版
-Content Warning,none,first,初日だけ無料
-Another Crab's Treasure,none,first,
-Bodycam,none,first,
-Once Human,none,first,
-Predecessor,none,ea_to_full,Paragon の後継とみればシリーズ
-Satisfactory,none,ea_to_full,
-Microsoft Flight Simulator 2024,series,first,
-Delta Force,series,first,昔のシリーズの復活
-Marvel Rivals,source,first,原作はアメコミ
-R.E.P.O.,none,first,
-Grand Theft Auto V Enhanced,series,rerelease,持っている人は無料で更新
-Split Fiction,none,first,
-The Last of Us™ Part II Remastered,series,rerelease,PC 移植
-Blue Prince,none,first,
-ELDEN RING NIGHTREIGN,series,first,派生
-DELTARUNE,series,first,
-Supermarket Simulator,none,ea_to_full,
-Grounded 2,series,first,早期アクセスでの初登場
-Hollow Knight: Silksong,series,first,
-Borderlands 4,series,first,
+name,fan_base,launch_type,release_override,note
+Overwatch®,series,rerelease,,Steam での発売。発売直後のレビューが集まっていない
+Starfield,none,first,,
+TEKKEN 8,series,first,,
+The Outlast Trials,series,ea_to_full,,Outlast シリーズの派生
+Palia,none,rerelease,,自社ランチャーで出たあとの Steam 版
+Content Warning,none,first,,初日だけ無料
+Another Crab's Treasure,none,first,,
+Bodycam,none,first,,
+Once Human,none,first,,
+Predecessor,none,ea_to_full,,Paragon の後継とみればシリーズ
+Satisfactory,none,ea_to_full,,
+Microsoft Flight Simulator 2024,series,first,,
+Delta Force,series,first,,昔のシリーズの復活
+Marvel Rivals,source,first,,原作はアメコミ
+R.E.P.O.,none,first,,
+Grand Theft Auto V Enhanced,series,rerelease,,持っている人は無料で更新
+Split Fiction,none,first,,
+The Last of Us™ Part II Remastered,series,rerelease,,PC 移植
+Blue Prince,none,first,,
+ELDEN RING NIGHTREIGN,series,first,,派生
+DELTARUNE,series,first,,
+Supermarket Simulator,none,ea_to_full,,
+Grounded 2,series,first,,早期アクセスでの初登場
+Hollow Knight: Silksong,series,first,,
+Borderlands 4,series,first,,
+Baldur's Gate 3,source_series,ea_to_full,,原作は D&D
+MARVEL SNAP,source,ea_to_full,,原作はアメコミ
+Sunkenland,none,first,,早期アクセスでの初登場
+Lies of P,none,first,,ピノキオが下敷き（古典は原作に数えない）
+Party Animals,none,first,,
+PAYDAY 3,series,first,,
+MY HERO ULTRA RUMBLE,source,first,,原作はアニメ・マンガ
+Diablo® IV,series,rerelease,,Battle.net で出たあとの Steam 版
+Lethal Company,none,first,,早期アクセスでの初登場
+Cities: Skylines II,series,first,,
+ARK: Survival Ascended,series,rerelease,,ARK の作り直し（早期アクセス）
+Call of Duty®: Modern Warfare® III,series,first,,
+Arma Reforger,series,ea_to_full,,
+Disney Dreamlight Valley,source,ea_to_full,,原作はディズニー作品
+THE FINALS,none,first,,
+"Warhammer 40,000: Rogue Trader",source,first,,"原作は Warhammer 40,000"
+Against the Storm,none,ea_to_full,,
+Ready or Not,none,ea_to_full,,
+House Flipper 2,series,first,,
+Enshrouded,none,first,,早期アクセスでの初登場
+Granblue Fantasy: Relink,series,first,,グラブルの派生
+HELLDIVERS™ 2,series,first,,
+Balatro,none,first,,
+Pacific Drive,none,first,,
+Sons Of The Forest,series,ea_to_full,,The Forest の続編
+Dragon's Dogma 2,series,first,,
+The Planet Crafter,none,ea_to_full,,
+Sky: Children of the Light,none,rerelease,,スマホ版のあとの Steam 版（早期アクセス）
+Dead Island 2,series,rerelease,,Epic で出たあとの Steam 版
+Bellwright,none,first,,早期アクセスでの初登場
+Manor Lords,none,first,,早期アクセスでの初登場
+Gray Zone Warfare,none,first,,早期アクセスでの初登場
+Ghost of Tsushima DIRECTOR'S CUT,none,rerelease,,PC 移植
+Dark and Darker,none,rerelease,,自社ランチャーで出たあとの Steam 復帰（早期アクセス）
+Chained Together,none,first,,
+The First Descendant,none,first,,
+7 Days to Die,none,ea_to_full,,
+Black Myth: Wukong,none,first,,西遊記が下敷き（古典は原作に数えない）
+Core Keeper,none,ea_to_full,,
+SMITE 2,series,first,,早期アクセスでの初登場
+"Warhammer 40,000: Space Marine 2",source_series,first,2024-09-05,"原作は Warhammer 40,000・先行プレイあり"
+TCG Card Shop Simulator,none,first,,早期アクセスでの初登場
+Ravenswatch,none,ea_to_full,,
+Throne and Liberty,none,first,2024-09-26,韓国版が先・先行プレイあり
+DRAGON BALL: Sparking! ZERO,source_series,first,2024-10-07,原作はアニメ・マンガ・先行プレイあり
+Red Dead Redemption,series,rerelease,,PC 移植
+Farming Simulator 25,series,first,,
+S.T.A.L.K.E.R. 2: Heart of Chornobyl,series,first,,
+Strinova,none,first,,中国版が先
+Path of Exile 2,series,first,,早期アクセスでの初登場
+Marvel's Spider-Man 2,source_series,rerelease,,PC 移植・原作はアメコミ
+Kingdom Come: Deliverance II,series,first,,
+Sid Meier's Civilization VII,series,first,2025-02-05,先行プレイあり
+Monster Hunter Wilds,series,first,,
+Schedule I,none,first,,早期アクセスでの初登場
+inZOI,none,first,,早期アクセスでの初登場
+RuneScape: Dragonwilds,series,first,,RuneScape の派生・早期アクセスでの初登場
+Clair Obscur: Expedition 33,none,first,,
+Wuthering Waves,none,rerelease,,自社ランチャーで出たあとの Steam 版
+F1® 25,source_series,first,2025-05-27,実在のスポーツ（F1）・先行プレイあり
+Stellar Blade™,none,rerelease,,PC 移植
+PEAK,none,first,,
+SCUM,none,ea_to_full,,
+Broken Arrow,none,first,2025-06-16,先行プレイあり
+Abiotic Factor,none,ea_to_full,,
+METAL GEAR SOLID Δ: SNAKE EATER,series,rerelease,2025-08-26,MGS3 のリメイク・先行プレイあり
+NBA 2K26,source_series,first,2025-08-29,実在のスポーツ（NBA）・先行プレイあり
+Arena Breakout: Infinite,series,rerelease,,自社ランチャーで出たあとの Steam 版・スマホ版 Arena Breakout が前作
+Tokyo Xtreme Racer,series,ea_to_full,,
+Hades II,series,ea_to_full,,
+EA SPORTS FC™ 26,source_series,first,2025-09-18,実在のスポーツ（サッカー）・先行プレイあり
+Battlefield™ 6,series,first,,
+Escape From Duckov,none,first,,
+RV There Yet?,none,first,,
+Dispatch,none,first,,
+Escape the Backrooms,none,ea_to_full,,
+MISERY,none,first,,
+ARC Raiders,none,first,,
+Football Manager 26,source_series,first,,実在のスポーツ（サッカー）
+IdleOn - The Incremental MMO,none,ea_to_full,,
+Where Winds Meet,none,first,,中国版が先
+Escape from Tarkov,none,rerelease,,自社ランチャーで出たあとの Steam 版・同じ日に正式版
+Half Sword,none,first,,早期アクセスでの初登場
+Mewgenics,none,first,,
+Resident Evil Requiem,series,first,,

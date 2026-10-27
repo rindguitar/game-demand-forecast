@@ -109,7 +109,7 @@ make test-topic     # トピック抽出テストのみ
 | `test_topic_cooccurrence.py` | `src/nlp/topic_cooccurrence.py` | 束ねたかの判定・束ねないとき公式の分類がそのまま単位に付くこと（束ねた単位・分類に無いトピックがあれば止まること）・リフトの計算・レシピの閾値・共起をゲーム数で数えること・ゲーム類似度 |
 | `test_weekly.py` | `src/timeseries/weekly.py` | 週の切り方・シェアとポジ率の算出・パネルの密度と集中度（期間を省略すると止まること・期間の外を数えないこと）・共通の期間（収集ログの端の日を含む週は使わない／最も遅い oldest と最も早い newest で決まる／ログに無いゲームがあれば止まる）・土台の選び方（発売が期間開始の26週前ちょうどは含める・tier が違えば入らない・手で外せる・発売日が読めなければ止まる）・期間と土台をまとめて決める入口と画面の文・実データでの確認（`data/` がある環境だけ。無ければ飛ばす） |
 | `test_forecast.py` | `src/timeseries/forecast.py` | 学習とテストの切り方（全単位で同じ週・欠測の除き方）・比べる相手2つ・MAE と比・勝ちの数え方（比が1未満だけ）・Prophet が年次季節性あり／なしで回ること・学習が時間切れのとき Newton 法で学び直すこと・発売を出来事として渡すこと（選び方・holidays の形・比べる相手が発売後の週を除くこと）・発売を段差の印としても渡すこと（印の付け方・比べる相手・発売の効き目の表・勝ちの基準）・設定を確かめ用の期間で選ぶこと（期間の切り方・選び方・Prophet への渡し方） |
-| `test_persistence.py` | `src/timeseries/persistence.py` | 窓の切り方・残った割合（件数・割合）・発売前の比・測れない発売の除外・区分ファイルの検査・組の分け方・3本未満の組で中央値を出さないこと・相対値・食い違いの印 |
+| `test_persistence.py` | `src/timeseries/persistence.py` | 窓の切り方・残った割合（件数・割合）・発売前の比・測れない発売の除外・区分ファイルの検査・発売日の上書き（先行プレイが発売直後の窓に入ること）・組の分け方・3本未満の組で中央値を出さないこと・相対値・食い違いの印 |
 | `test_persistence_elements.py` | `src/timeseries/persistence_elements.py` | 要素の表（①だけ・上位タグ）・最小本数・中央値と差・ペア・シャッフル（種固定で同じ結果・分ける要素は p が小さい）・max_diff_95・相対値が空の発売の除外 |
 | `test_timeseries_plots.py` | `src/visualization/timeseries_plots.py` | 図が書き出せること・充足度の配色が赤↔緑でないこと・予測の図が書き出せること・予測の4本が色と線種で見分けられること・発売の週の点線が範囲内のものだけ引かれること |
 | `test_game_selection.py` | `scripts/collect/collect_timeseries_dataset.py` | 選定の3条件（ジャンル・土台の上限・タグ重なり）・既存を固定した追加・台帳の型往復 |
