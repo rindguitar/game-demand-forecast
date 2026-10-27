@@ -83,6 +83,7 @@
 | [#56](https://github.com/rindguitar/game-demand-forecast/issues/56) | コードの積み残しを片づける | 待ち（既定値の件は予測を回すたびに踏む恐れ） |
 | [#57](https://github.com/rindguitar/game-demand-forecast/issues/57) | requirements.md / design.md を書く | 待ち |
 | [#42](https://github.com/rindguitar/game-demand-forecast/issues/42) | 需要スコアを「部品の合算」から「組み合わせ」へ広げるか | 保留（#63 の段階3で再開する） |
+| [#69](https://github.com/rindguitar/game-demand-forecast/issues/69) | 早期アクセス中・先行プレイ中のレビューと発売後のレビューを比べて、ユーザーが求めていたものを測る | 保留（アイデア・#63 の段階2・3の後） |
 | [#19](https://github.com/rindguitar/game-demand-forecast/issues/19) | 感情分析モデルの高精度化 | 保留 |
 | [#30](https://github.com/rindguitar/game-demand-forecast/issues/30) | 多ゲーム・少レビューで OOD 精度は上がるか | 保留（時系列フェーズの後） |
 | [#10](https://github.com/rindguitar/game-demand-forecast/issues/10) | 感情分析結果の DB 保存と可視化 | 保留（2026-08-18） |
