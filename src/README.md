@@ -154,7 +154,7 @@ flowchart LR
 
 | ファイル | 説明 |
 |---|---|
-| `topic.py` | BERTopicによるトピック抽出。ゲーム名除去・英語フィルタリング付き |
+| `topic.py` | BERTopicによるトピック抽出。ゲーム名除去（別データのタイトルも `extra_titles` で消せる）・英語フィルタリング・分割割り当て（`chunk_size`）付き |
 | `topic_category.py` | 抽出したトピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞 / 未分類） |
 | `topic_bundle.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `topic_granularity.py` | 抽出済みのトピックをマージ木にまとめ、任意の個数で切って粗い版を作る |
@@ -162,7 +162,9 @@ flowchart LR
 | `topic_cooccurrence.py` | ゲームごとのレシピ（そのゲームらしい部品）と、部品ペアの共起を出す。束ねないときの単位の分類も、公式の分類から引く |
 
 **主要関数（topic.py）:**
-- `create_topic_model(min_topic_size, embedding_model_name)` — モデル作成
+- `create_topic_model(min_topic_size, embedding_model_name, umap_random_state)` — モデル作成（シード指定で UMAP を固定）
+- `save_topic_model(..., serialization)` / `load_topic_model(path)` — 保存・読み込み（pickle なら UMAP/HDBSCAN も残る）
+- `uses_similarity_assignment(topic_model)` — UMAP/HDBSCAN を持たず類似度で割り当てる形かの判定
 - `extract_topics(texts, topic_model)` — トピック抽出実行
 - `remove_game_names(df, all_games, extra_words)` — ゲーム名・固有名詞の除去。
   範囲は「語 × ゲーム」で決める（2語以上のタイトルの並びと `configs/proper_nouns.txt` は

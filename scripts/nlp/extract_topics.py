@@ -31,6 +31,7 @@ from src.nlp.topic import (
     assign_topics,
     save_topic_model,
     load_topic_model,
+    uses_similarity_assignment,
     print_topic_summary,
     get_topic_info,
     get_topic_words
@@ -49,6 +50,40 @@ def sample_for_fit(df: pd.DataFrame, per_game: int, total: int, seed: int) -> pd
     if total and len(sample) > total:
         sample = sample.sample(n=total, random_state=seed)
     return sample
+
+
+def load_extra_titles(path: str) -> list:
+    """
+    --extra-titles のCSV（name列）からタイトルを読む
+
+    ファイルが無い・name列が無いときは止める（黙って空にすると、タイトルが
+    消えないまま学習時と違う条件で割り当ててしまうため）。
+    """
+    if not os.path.exists(path):
+        sys.exit(f"--extra-titles のファイルが見つからない: {path}")
+    titles_df = pd.read_csv(path)
+    if 'name' not in titles_df.columns:
+        sys.exit(f"--extra-titles のCSVに name 列が無い: {path}（列: {list(titles_df.columns)}）")
+    return titles_df['name'].dropna().astype(str).tolist()
+
+
+def should_stop_for_similarity(topic_model, allow: bool) -> bool:
+    """
+    読み込んだモデルが類似度で割り当てる形なら、割り当ての前に止めるべきかを返す
+
+    1. モデルが UMAP+HDBSCAN を持つか判定 → 2. 持たず allow でもなければ True（止める）
+    → 3. 持たず allow なら警告を1行出して False
+
+    理由: 類似度の割り当ては Outlier がほぼ出ず、学習した実行の中での割り当て
+    （UMAP+HDBSCAN）と結果が揃わない。safetensors で保存したモデルがこの形になる。
+    """
+    if not uses_similarity_assignment(topic_model):
+        return False
+    if allow:
+        print("   ⚠️ このモデルは UMAP/HDBSCAN を持たず、類似度で割り当てる"
+              "（--allow-similarity-assignment）")
+        return False
+    return True
 
 
 def main():
@@ -73,6 +108,9 @@ def main():
     parser.add_argument('--remove-all-game-names', action='store_true',
                         help='全ゲームの名前を全レビューから除去する。既定は自分の名前だけで、'
                              'その場合は他ゲームへの言及が残りトピックがゲーム専用になる')
+    parser.add_argument('--extra-titles', default=None,
+                        help='入力にない別のゲームのタイトルCSV（name列）。2語以上の並びを全レビューから消す。'
+                             '学習時に消したタイトルを、別のデータでも消して同じ条件にするために使う')
     parser.add_argument('--proper-nouns', default='configs/proper_nouns.txt',
                         help='追加で除去する固有名詞のファイル（開発元名など）')
     parser.add_argument('--skip-english-filter', action='store_true',
@@ -81,6 +119,16 @@ def main():
                         help='学習済みモデルの保存先ディレクトリ')
     parser.add_argument('--model-input', default=None,
                         help='学習済みモデルを読み込んで再学習しない')
+    parser.add_argument('--umap-seed', type=int, default=None,
+                        help='UMAP の乱数シード（既定None=固定しない・固定すると並列化されず遅くなる）')
+    parser.add_argument('--model-format', choices=['safetensors', 'pickle'], default='safetensors',
+                        help='モデルの保存形式。pickle は UMAP/HDBSCAN も残る（1ファイル）。'
+                             'safetensors は残らず、読み込み後は類似度での割り当てになる')
+    parser.add_argument('--allow-similarity-assignment', action='store_true',
+                        help='UMAP/HDBSCAN を持たないモデル（safetensors）での割り当てをわざと許す')
+    parser.add_argument('--chunk-size', type=int, default=0,
+                        help='割り当て（transform）を何件ずつに分けるか（0=一度に全部）。'
+                             '件数が多いと埋め込みでメモリが足りなくなるため')
     parser.add_argument('--seed', type=int, default=42, help='サンプリングのシード')
     args = parser.parse_args()
 
@@ -120,8 +168,12 @@ def main():
     extra = load_proper_nouns(args.proper_nouns) if args.remove_all_game_names else []
     if extra:
         print(f"   ✓ 追加の固有名詞: {len(extra)}語（{args.proper_nouns}）")
+    extra_titles = load_extra_titles(args.extra_titles) if args.extra_titles else None
+    if extra_titles is not None:
+        print(f"   ✓ 追加のタイトル: {len(extra_titles)}件（{args.extra_titles}）")
     df = remove_game_names(df, text_column='review_text', game_name_column='game_name',
-                           all_games=args.remove_all_game_names, extra_words=extra)
+                           all_games=args.remove_all_game_names, extra_words=extra,
+                           extra_titles=extra_titles)
     texts = df['review_text'].tolist()
 
     # 4. 学習用サンプルの決定
@@ -140,20 +192,27 @@ def main():
     if args.model_input:
         topic_model = load_topic_model(args.model_input)
         print(f"   ✓ 学習済みモデルを読み込み: {args.model_input}")
+        if should_stop_for_similarity(topic_model, args.allow_similarity_assignment):
+            sys.exit("このモデルは UMAP/HDBSCAN を持たず、類似度で割り当てる形になる"
+                     "（Outlier がほぼ出ず、学習した実行の中での割り当てと結果が揃わない。"
+                     "safetensors で保存したモデルがこうなる）。--model-format pickle で学び直すか、"
+                     "わざと使うなら --allow-similarity-assignment を付ける")
     else:
         topic_model = create_topic_model(
             min_topic_size=args.min_topic_size,
             embedding_model_name='all-MiniLM-L6-v2',
             ngram_range=(1, 2),
             min_df=2,
-            verbose=True
+            verbose=True,
+            umap_random_state=args.umap_seed
         )
         print(f"   ✓ min_topic_size: {args.min_topic_size}")
         print("   ⏳ 学習中（次元削減とクラスタリングに時間がかかる）...")
         topic_model, fit_topics, _ = extract_topics(
             texts=fit_texts, topic_model=topic_model, verbose=True)
         if args.model_output:
-            save_topic_model(topic_model, args.model_output)
+            save_topic_model(topic_model, args.model_output,
+                             serialization=args.model_format)
             print(f"   ✓ モデルを保存: {args.model_output}")
     fit_sec = time.time() - t_fit
 
@@ -161,7 +220,8 @@ def main():
     print("\n[6/6] 全件へのトピック割り当て")
     t_tr = time.time()
     if split_fit or args.model_input:
-        topics, probabilities = assign_topics(topic_model, texts, verbose=True)
+        topics, probabilities = assign_topics(
+            topic_model, texts, verbose=True, chunk_size=args.chunk_size)
     else:
         topics, probabilities = fit_topics, None
         print("   ✓ 学習と対象が同じなので、学習時の結果をそのまま使う")

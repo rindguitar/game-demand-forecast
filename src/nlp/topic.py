@@ -5,6 +5,7 @@ BERTopicを使用してゲームレビューからトピック（ゲーム要素
 """
 
 from typing import List, Tuple, Optional
+import numpy as np
 import pandas as pd
 import os
 import re
@@ -113,7 +114,8 @@ def _replace_patterns(series: pd.Series, patterns: List[str]) -> pd.Series:
 def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
                       game_name_column: str = 'game_name',
                       all_games: bool = False,
-                      extra_words: Optional[List[str]] = None) -> pd.DataFrame:
+                      extra_words: Optional[List[str]] = None,
+                      extra_titles: Optional[List[str]] = None) -> pd.DataFrame:
     """
     レビューからゲーム名・固有名詞を除去する
 
@@ -128,7 +130,11 @@ def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
     2. 自分のゲームのレビューからだけ消すもの: タイトルを単語に割ったもの
        （MTGのレビューでだけ "magic" "arena" が消え、他ゲームでは残る）
 
-    all_games=False のときは 2 だけを行う。
+    all_games=False のときは 2 だけを行う（extra_titles があれば 1 も行う）。
+
+    extra_titles は、入力にない別のゲームのタイトル。1 と同じ規則（2語以上の並びだけ・
+    1語は消さない）で全レビューから消す。2 には使わない。学習時と同じ条件で別のデータに
+    話題を割り当てるときに使う（例: 85本に、64本のタイトルも消して割り当てる）。
 
     除去フィルター（2 のみ）:
         - 3文字以下の単語（"v", "of", "the"等）
@@ -140,6 +146,7 @@ def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
         game_name_column: ゲーム名カラム名
         all_games: True で 1 と 2 の両方、False で 2 のみ
         extra_words: ロスター外の固有名詞（開発元名など）。1 として扱う
+        extra_titles: 入力にない別のゲームのタイトル。1 の規則で消す（入力と重複したら1回だけ）
 
     Returns:
         除去済みのデータフレーム
@@ -147,10 +154,12 @@ def remove_game_names(df: pd.DataFrame, text_column: str = 'review_text',
     df_copy = df.copy()
     names = [n for n in df_copy[game_name_column].dropna().unique()]
 
-    # 1. 全レビューから、完全なタイトルの並びと extra_words を消す
-    if all_games or extra_words:
+    # 1. 全レビューから、完全なタイトルの並び（入力 + extra_titles）と extra_words を消す
+    if all_games or extra_words or extra_titles:
+        # 入力のタイトルと extra_titles を重複なしで合わせる（all_games=False でも extra_titles は使う）
+        all_titles = (list(names) if all_games else []) + list(extra_titles or [])
         # 長い名前から先に消す（"Hollow Knight: Silksong" を "Silksong" より先に処理する）
-        titles = sorted((str(n) for n in names), key=len, reverse=True) if all_games else []
+        titles = sorted(dict.fromkeys(str(n) for n in all_titles), key=len, reverse=True)
         extras = sorted(extra_words or [], key=len, reverse=True)
         patterns = [p for p in
                     ([_phrase_pattern(t, min_tokens=2) for t in titles]
@@ -185,10 +194,14 @@ def create_topic_model(
     embedding_model_name: str = 'all-MiniLM-L6-v2',
     ngram_range: Tuple[int, int] = (1, 2),
     min_df: int = 2,
-    verbose: bool = True
+    verbose: bool = True,
+    umap_random_state: Optional[int] = None
 ) -> BERTopic:
     """
     BERTopicモデルを作成
+
+    1. CountVectorizer と埋め込みモデルを用意 → 2. umap_random_state があれば
+    UMAP を作る → 3. BERTopic に渡す（HDBSCAN は BERTopic の既定のまま）
 
     Args:
         min_topic_size: 最小トピックサイズ
@@ -196,6 +209,9 @@ def create_topic_model(
         ngram_range: n-gram範囲（デフォルト: (1, 2) = 単語 + 2単語の組み合わせ）
         min_df: 最小出現頻度
         verbose: 詳細ログ表示
+        umap_random_state: UMAP の乱数シード。None なら BERTopic の既定の UMAP
+            （毎回結果が変わる）。値があれば既定と同じ設定に random_state だけ足す
+            （UMAP は random_state を固定すると並列化されず遅くなる）
 
     Returns:
         BERTopicモデル
@@ -223,10 +239,24 @@ def create_topic_model(
     # 埋め込みモデル
     embedding_model = SentenceTransformer(embedding_model_name)
 
+    # UMAP（シード指定時のみ。設定は BERTopic 0.17.4 の既定と同じ）
+    umap_model = None
+    if umap_random_state is not None:
+        from umap import UMAP
+        umap_model = UMAP(
+            n_neighbors=15,
+            n_components=5,
+            min_dist=0.0,
+            metric='cosine',
+            low_memory=False,
+            random_state=umap_random_state,
+        )
+
     # BERTopicモデル
     topic_model = BERTopic(
         embedding_model=embedding_model,
         vectorizer_model=vectorizer,
+        umap_model=umap_model,
         min_topic_size=min_topic_size,
         verbose=False
     )
@@ -292,7 +322,8 @@ def extract_topics(
 def assign_topics(
     topic_model: BERTopic,
     texts: List[str],
-    verbose: bool = True
+    verbose: bool = True,
+    chunk_size: int = 0
 ) -> Tuple[List[int], List[float]]:
     """
     学習済みモデルで、テキストにトピックを割り当てる（transform）
@@ -301,19 +332,44 @@ def assign_topics(
     弱いため。重い処理は一部のデータで済ませ、割り当ては「既にできている塊のどれに
     近いか」を見るだけなので全件に掛けられる（詳細は Wiki「トピック抽出」）。
 
+    処理の流れ: 1. texts を chunk_size 件ずつに分ける（0 なら全件1塊）
+    → 2. 塊ごとに transform → 3. topics と probabilities を元の順につなげる
+
     Args:
         topic_model: 学習済みBERTopicモデル
         texts: 割り当て対象のテキスト
         verbose: 詳細ログ表示
+        chunk_size: 1回に transform する件数。0 なら一度に全件
+            （件数が多いと埋め込みでメモリを食うので、その場合に分ける）
 
     Returns:
-        (トピックIDのリスト, 確率のリスト)
+        (トピックIDのリスト, 確率)。確率は transform の返し方（1次元/2次元の
+        ndarray・list・None）に合わせてつなげる
     """
     if verbose:
         print(f"トピック割り当て（transform）: {len(texts):,}件")
 
-    topics, probabilities = topic_model.transform(texts)
-    topics = [int(t) for t in topics]
+    # 1. 分割の区切りを決める
+    step = chunk_size if chunk_size and chunk_size > 0 else max(len(texts), 1)
+    starts = list(range(0, len(texts), step)) or [0]
+
+    # 2. 塊ごとに transform
+    topics: List[int] = []
+    prob_parts = []
+    for i, start in enumerate(starts, 1):
+        part_topics, part_probs = topic_model.transform(texts[start:start + step])
+        topics.extend(int(t) for t in part_topics)
+        prob_parts.append(part_probs)
+        if verbose and len(starts) > 1:
+            print(f"  {i}/{len(starts)}: {min(start + step, len(texts)):,}件まで")
+
+    # 3. 確率をつなげる（1塊ならそのまま返す）
+    if len(prob_parts) == 1:
+        probabilities = prob_parts[0]
+    elif any(p is None for p in prob_parts):
+        probabilities = None
+    else:
+        probabilities = np.concatenate([np.asarray(p) for p in prob_parts], axis=0)
 
     if verbose:
         outlier = topics.count(-1)
@@ -326,18 +382,29 @@ def assign_topics(
 def save_topic_model(
     topic_model: BERTopic,
     path: str,
-    embedding_model_name: str = 'all-MiniLM-L6-v2'
+    embedding_model_name: str = 'all-MiniLM-L6-v2',
+    serialization: str = 'safetensors'
 ) -> None:
     """
     学習済みモデルを保存する
 
     埋め込みモデルは本体を書き出さず名前だけ記録する（サイズが大きく、
     名前があれば再取得できるため）。
+
+    serialization:
+        'safetensors' — ディレクトリに保存。UMAP と HDBSCAN は残らない
+            （読み込み後の割り当ては話題との類似度になり、学習時と結果が揃わない）
+        'pickle' — 1ファイルに保存。UMAP と HDBSCAN も残る（保存と読み込みで
+            BERTopic・依存ライブラリ・Python のバージョンを揃える必要がある）
     """
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    if serialization == 'pickle':
+        # pickle では save_embedding_model=False で本体を外す（名前は読み込み時に渡す）
+        topic_model.save(path, serialization='pickle', save_embedding_model=False)
+        return
     topic_model.save(
         path,
-        serialization='safetensors',
+        serialization=serialization,
         save_ctfidf=True,
         save_embedding_model=embedding_model_name,
     )
@@ -347,8 +414,19 @@ def load_topic_model(
     path: str,
     embedding_model_name: str = 'all-MiniLM-L6-v2'
 ) -> BERTopic:
-    """保存済みモデルを読み込む（再学習を避けるため）"""
+    """保存済みモデルを読み込む（再学習を避けるため）。パスがファイルなら pickle として読まれる"""
     return BERTopic.load(path, embedding_model=embedding_model_name)
+
+
+def uses_similarity_assignment(topic_model: BERTopic) -> bool:
+    """
+    読み込んだモデルが UMAP+HDBSCAN を持たず、類似度で割り当てる形かを判定する
+
+    safetensors で保存したモデルは hdbscan_model が BaseCluster になり、transform は
+    「文書と話題の埋め込みの cos 類似度の最大」で割り当てる（Outlier がほぼ出ない）。
+    """
+    from bertopic.cluster import BaseCluster
+    return isinstance(topic_model.hdbscan_model, BaseCluster)
 
 
 def get_topic_info(topic_model: BERTopic, verbose: bool = True) -> pd.DataFrame:

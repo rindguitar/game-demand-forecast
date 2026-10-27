@@ -295,6 +295,7 @@ flowchart LR
 | `train_sentiment.py` | DistilBERTの感情分析モデル学習（本番・実験兼用） |
 | `train_dapt.py` | DAPT（未ラベルレビューでMLM継続学習・ドメイン適応モデル作成） |
 | `extract_topics.py` | BERTopicによるトピック抽出（本番実行） |
+| `make_topic_fit_sample.py` | 複数のレビューCSVから、ゲームごとに上限をかけた学習用サンプルを作る（149本の学び直し用） |
 | `categorize_topics.py` | トピックの仕分け（①要素 / ②品質・運営 / ③ビジネス条件 / 中身なし / 固有名詞） |
 | `bundle_topics.py` | 小さいトピックをSteamタグの語彙に束ねる |
 | `compare_topic_granularity.py` | 粒度を粗い側へ動かし、レベルごとに同じ物差しで測って比べる（Issue #37） |
@@ -323,6 +324,33 @@ docker compose exec dev python scripts/nlp/extract_topics.py \
     --skip-english-filter --remove-all-game-names \
     --model-output models/topic_full
 ```
+
+別のデータに、学習済みモデルで話題を割り当てるときの引数:
+
+- `--extra-titles PATH`: 入力にない別のゲームのタイトルCSV（`name` 列）。2語以上のタイトルの並びを全レビューから消す（1語は消さない）。ファイルや `name` 列が無ければ止まる。モデルが学んだときと同じ条件にするために使う
+- `--chunk-size N`: 割り当て（transform）をN件ずつに分ける（既定0=一度に全部）。件数が多いと埋め込みでメモリが足りなくなるため
+
+85本の話題は、64本と同じ基準で割り当てるため、149本（64本＋85本）で学び直します（Issue #63 段階2）。流れは「サンプル → 学習 → 64本・85本に別々に割り当て」です。
+
+```mermaid
+flowchart LR
+    R[("64本・85本の<br/>レビュー")] --> S["make_topic_fit_sample.py"]
+    S --> FS[("学習用サンプル<br/>10万件・149本")]
+    FS --> F["extract_topics.py<br/>学習"]
+    F --> M{{"models/<br/>topic_149.pkl"}}
+    M --> A64["extract_topics.py<br/>64本に割り当て"]
+    M --> A85["extract_topics.py<br/>85本に割り当て"]
+    A64 --> W64[("reviews_timeseries<br/>_with_topics_149.csv")]
+    A85 --> W85[("launch_extra/reviews_timeseries<br/>_with_topics_149.csv")]
+```
+
+割り当ての2本は、それぞれのレビュー（64本は `reviews_timeseries.csv`、85本は `launch_extra/reviews_timeseries.csv`）も読みます（線が交差するので図からは外しています）。
+
+`make topics-149` で4つをまとめて流せます（時間の目安: サンプル数分・学習 10〜20分・割り当て 64本 約45分 / 85本 約1.5時間。試走〈2万件で32秒〉からの見込み）。別々に割り当てるのはメモリのためで、同じモデル・同じ基準なので結果は揃います。入力にない方のタイトルも `--extra-titles` で消して、学習時と条件をそろえます。割り当ては `TOPIC_CHUNK`（既定50万件）ずつ。試走は `make topics-assign-64 TOPIC_ARGS="--limit 20000"`。
+
+⚠️ safetensors で保存したモデル（`models/topic_64` など）は UMAP/HDBSCAN が残らず、割り当てが話題との類似度になります（Outlier がほぼ出ない）。そのため `--model-input` でこの形を読むと、割り当ての前に止まります（`--allow-similarity-assignment` でわざと続行可）。UMAP/HDBSCAN を残すには `--model-format pickle` で保存します。
+
+学習・保存の引数: `--umap-seed N`（UMAP の乱数を固定。既定は固定しない）/ `--model-format {safetensors,pickle}`（既定 safetensors）。
 
 `train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。
 

@@ -100,7 +100,8 @@ make test-topic     # トピック抽出テストのみ
 |---|---|---|
 | `test_sentiment.py` | `src/nlp/sentiment.py` | 感情分析推論の動作確認 |
 | `test_evaluation.py` | `src/nlp/evaluation.py` | 評価指標（Accuracy/F1等）の計算確認 |
-| `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリング・ゲーム名除去の動作確認 |
+| `test_topic.py` | `src/nlp/topic.py` | トピック抽出・英語フィルタリング・ゲーム名除去（別ゲームのタイトル `extra_titles` を含む）・分割割り当て（`chunk_size`）・`--extra-titles` の読み込み・UMAP シード・pickle 保存・類似度割り当ての判定と止まる条件の動作確認 |
+| `test_make_topic_fit_sample.py` | `scripts/nlp/make_topic_fit_sample.py` | 学習用サンプル（1本あたり・全体の上限、空本文の除外、複数ファイル、seed 再現） |
 | `test_topic_category.py` | `src/nlp/topic_category.py` | トピックの仕分け（語彙の読み込み・分類・曖昧判定・①は証拠が要ること・`classify_with_evidence` が唯一の入口であること） |
 | `test_element_vocabulary.py` | `scripts/nlp/update_element_vocabulary.py` | ①の語彙をタグから作ること・中身を表さないタグ・遊んだ結果の感想のタグを除くこと |
 | `test_tag_semantics.py` | `src/nlp/tag_semantics.py` | タグとの意味の照合・判定ファイル（`configs/steam_tags.txt`）の読み込み・判定の無いタグや二重の判定があれば止まること |
