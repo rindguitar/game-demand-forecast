@@ -28,6 +28,8 @@ Issue #42「需要スコアを部品の合算から組み合わせへ広げる�
         --model models/topic_64 --reviews data/timeseries/reviews_timeseries_with_topics_64.csv \\
         --level 526 --categories-csv data/timeseries/topic_categories_64.csv \\
         --outdir data/timeseries/cooccurrence_64
+
+    # 149本（64本＋85本）を1つの全体にする: make recipes-149
 """
 
 import argparse
@@ -56,7 +58,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--model', default='models/topic_full')
-    parser.add_argument('--reviews', default='data/timeseries/reviews_timeseries_with_topics.csv')
+    parser.add_argument('--reviews', nargs='+',
+                        default=['data/timeseries/reviews_timeseries_with_topics.csv'],
+                        help='話題付きのレビューCSV。複数渡すとつなげて1つの全体にする（リフトの分母）')
     parser.add_argument('--categories', default='configs/topic_categories.txt',
                         help='分類語彙。束ねたときのその場の仕分けだけで使う')
     parser.add_argument('--categories-csv', default=None,
@@ -113,7 +117,8 @@ def main():
     from bertopic import BERTopic
     print(f"モデルを読む: {args.model}")
     model = BERTopic.load(args.model)
-    df = pd.read_csv(args.reviews, usecols=['game_name', 'topic_id'])
+    df = pd.concat([pd.read_csv(p, usecols=['game_name', 'topic_id']) for p in args.reviews],
+                   ignore_index=True)
     weights = df['topic_id'].value_counts().to_dict()
 
     matrix_source, topic_ids = topic_matrix(model, args.distance)

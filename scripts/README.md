@@ -256,6 +256,8 @@ flowchart LR
   上図のほかに `pool_cache.json` と、その判定ファイル `configs/steam_tags.txt`（既定値）も読みます。
   **`--categories-csv` を渡すと止まります**
 
+`--reviews` には CSV を複数渡せます。つなげて1つの全体として、リフトの分母にします（149本は `make recipes-149`）。
+
 64本・束ねないときの実行例:
 
 ```bash
@@ -346,11 +348,14 @@ flowchart LR
 
 割り当ての2本は、それぞれのレビュー（64本は `reviews_timeseries.csv`、85本は `launch_extra/reviews_timeseries.csv`）も読みます（線が交差するので図からは外しています）。
 
-`make topics-149` で4つをまとめて流せます（時間の目安: サンプル数分・学習 10〜20分・割り当て 64本 約45分 / 85本 約1.5時間。試走〈2万件で32秒〉からの見込み）。別々に割り当てるのはメモリのためで、同じモデル・同じ基準なので結果は揃います。入力にない方のタイトルも `--extra-titles` で消して、学習時と条件をそろえます。割り当ては `TOPIC_CHUNK`（既定50万件）ずつ。試走は `make topics-assign-64 TOPIC_ARGS="--limit 20000"`。
+`make topics-149` で4つをまとめて流せます（実績: 学習 約4分・割り当て 64本 約70分 / 85本 約1時間45分）。別々に割り当てるのはメモリのためで、同じモデル・同じ基準なので結果は揃います。入力にない方のタイトルも `--extra-titles` で消して、学習時と条件をそろえます。割り当ては `TOPIC_CHUNK`（既定50万件）ずつ。試走は `make topics-assign-64 TOPIC_ARGS="--limit 20000"`。
 
 ⚠️ safetensors で保存したモデル（`models/topic_64` など）は UMAP/HDBSCAN が残らず、割り当てが話題との類似度になります（Outlier がほぼ出ない）。そのため `--model-input` でこの形を読むと、割り当ての前に止まります（`--allow-similarity-assignment` でわざと続行可）。UMAP/HDBSCAN を残すには `--model-format pickle` で保存します。
 
 学習・保存の引数: `--umap-seed N`（UMAP の乱数を固定。既定は固定しない）/ `--model-format {safetensors,pickle}`（既定 safetensors）。
+
+割り当てたあとは、`make topics-categorize-149`（話題の仕分け → `topic_categories_149.csv`・約40秒）→ `make recipes-149`（149本を全体にしたレシピ → `cooccurrence_149/`・約40秒）の順に流します。
+仕分けはルールだけです。レシピは `build_topic_cooccurrence.py` の `--reviews` に64本と85本の CSV を両方渡し、つなげて1つの全体にします（リフトの分母・→ `docs/decisions.md` 2026-11-24）。
 
 `train_sentiment.py` は `scripts/learning_curve/learning_curve_experiment.py` と `scripts/evaluation/seed_study.py` からもimportされます。
 
