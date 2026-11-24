@@ -2,7 +2,8 @@
         build up down restart logs shell exec gpu-check python-version \
         extract-topics compare-granularity cooccurrence validate-tags element-vocabulary test-topic \
         collect-10k collect-20k learning-curve analyze-curve collect-launch-extra \
-        topics-fit-sample topics-fit topics-assign-64 topics-assign-85 topics-149
+        topics-fit-sample topics-fit topics-assign-64 topics-assign-85 topics-149 \
+        topics-categorize-149 recipes-149
 
 help:
 	@echo "Available commands:"
@@ -56,9 +57,11 @@ help:
 	@echo "  make collect-launch-extra - 期間中の発売を選ばずに全部集める（#63 段階2・実績で約18時間）"
 	@echo "  make topics-149           - 149本で話題を学び直し、64本・85本に別々に割り当てる（#63 段階2・以下4つをまとめて）"
 	@echo "  make topics-fit-sample    - 149本から学習用サンプルを作る（目安: 数分）"
-	@echo "  make topics-fit           - サンプルでトピックモデルを学習しpickle保存（目安: 10〜20分）"
-	@echo "  make topics-assign-64     - 64本に149本のモデルで話題を割り当てる（目安: 約1時間）"
-	@echo "  make topics-assign-85     - 85本に149本のモデルで話題を割り当てる（目安: 約1.5時間）"
+	@echo "  make topics-fit           - サンプルでトピックモデルを学習しpickle保存（実績で約4分）"
+	@echo "  make topics-assign-64     - 64本に149本のモデルで話題を割り当てる（実績で約70分）"
+	@echo "  make topics-assign-85     - 85本に149本のモデルで話題を割り当てる（実績で約1時間45分）"
+	@echo "  make topics-categorize-149 - 149本のモデルの話題を①〜③・中身なしに仕分ける（topics-149 のあと）"
+	@echo "  make recipes-149          - 149本を全体にして、ゲームごとのレシピを作る（topics-categorize-149 のあと）"
 	@echo "  make launch-persistence   - 発売後の山の続き方を測る（区分ごとの中央値との比・Issue #63）"
 	@echo "                              引数は COLLECT_ARGS/INSPECT_ARGS で個別に渡す"
 	@echo "  make persistence-elements - 山の続き方と、発売が持つ要素の関係をのぞく（シャッフルで偶然の差を確認・Issue #63）"
@@ -289,6 +292,28 @@ topics-assign-85:
 		--skip-english-filter --remove-all-game-names \
 		--extra-titles data/timeseries/games.csv \
 		--chunk-size $(TOPIC_CHUNK) $(TOPIC_ARGS)
+
+# 149本のモデルの話題を仕分け、149本を全体にしてレシピを作る（Issue #63 段階2・topics-149 のあと）
+# 仕分けはルールだけ（要手動判定・未分類はレシピから外す。64本と同じ扱い）。話題のキーワードは
+#   64本・85本で同じモデルのものなので、どちらの統計を渡しても仕分けは同じになる
+# レシピのリフトの分母は149本全体（話題を学んだのと同じ顔ぶれ）。64本と85本に同じゲームは無い。
+#   期間は切らない（64本のレシピも全期間。08-24 の週で切るのは山の続き方の測定のため）
+# RECIPE_LEVEL は149本のモデルの話題の数（全部を別々の単位にする＝束ねない）
+TOPIC_CATEGORIES_149 ?= data/timeseries/topic_categories_149.csv
+RECIPE_LEVEL ?= 476
+topics-categorize-149:
+	docker compose exec dev python scripts/nlp/categorize_topics.py \
+		--stats data/timeseries/topic_statistics_149_64.csv \
+		--reviews data/timeseries/reviews_timeseries_with_topics_149.csv \
+		--output $(TOPIC_CATEGORIES_149)
+
+recipes-149:
+	docker compose exec dev python scripts/nlp/build_topic_cooccurrence.py \
+		--model $(TOPIC_MODEL) --level $(RECIPE_LEVEL) \
+		--reviews data/timeseries/reviews_timeseries_with_topics_149.csv \
+		          $(LAUNCH_EXTRA_DIR)/reviews_timeseries_with_topics_149.csv \
+		--categories-csv $(TOPIC_CATEGORIES_149) \
+		--outdir data/timeseries/cooccurrence_149 $(RECIPE_ARGS)
 
 # 週次シェア（全64本）を Prophet で予測し、学習期間の平均・直近の平均と当たり具合を比べる（Issue #41・数十秒）
 # 引数は FORECAST_ARGS で渡す。例: make forecast-prophet FORECAST_ARGS="--recent-weeks 8 --no-plot"
